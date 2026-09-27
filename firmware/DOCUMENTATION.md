@@ -381,7 +381,7 @@ OLED OK
 I2S: z1=1 z2=1
 Heap after I2S: 139912
 Audio task: started
-Ring selftest: PASS frames=5376/5376
+Ring selftest: PASS frames=10752/10752
 Heap before BT: 137216
 A2DP: started
 Heap after A2DP: 56964
@@ -935,7 +935,7 @@ vol:50, preset:1, v0:50, v1:50, bal:0
 
 ```powershell
 # 1. Самотест прошёл при загрузке
-#    Ring selftest: PASS frames=5376/5376
+#    Ring selftest: PASS frames=10752/10752
 
 # 2. Запустить воспроизведение и снять статистику
 pwsh -File .\tools\monitor.ps1 -Port COM14 -Commands "play" -Seconds 40
