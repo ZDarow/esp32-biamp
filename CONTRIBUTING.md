@@ -32,7 +32,14 @@
 ```bash
 arduino-cli core update-index
 arduino-cli core install esp32:esp32
-arduino-cli lib install "AudioTools" "Adafruit GFX Library" "Adafruit SSD1306"
+arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
+
+# audio-tools и ESP32-A2DP отсутствуют в реестре Arduino —
+# публикуются только на GitHub, поэтому ставятся вручную:
+git clone --depth 1 https://github.com/pschatzmann/arduino-audio-tools.git \
+  "$(arduino-cli config get directories.user)/libraries/audio-tools"
+git clone --depth 1 https://github.com/pschatzmann/ESP32-A2DP.git \
+  "$(arduino-cli config get directories.user)/libraries/ESP32-A2DP"
 ```
 
 ### Приложение

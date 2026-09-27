@@ -4,7 +4,7 @@
 
 ## Среда (Windows + VSCode, без Android Studio)
 - **JDK 17** (Temurin). AGP 8.x требует именно 17.
-- **AGP 8.7.3**, **Kotlin 2.0.21**, **Gradle 8.9** (см. `1.0.md`).
+- **AGP 8.7.3**, **Kotlin 2.0.21**, **Gradle 8.9** (версии — в `build.gradle.kts` и `gradle/wrapper/gradle-wrapper.properties`).
 - Android SDK: только `cmdline-tools`. Путь: `C:\Android\Sdk\cmdline-tools\latest\bin` — внутренняя папка `latest` **обязательна**.
 - Установка пакетов: `.\sdkmanager.bat "platform-tools" "platforms;android-35" "build-tools;35.0.0"`.
 - `ANDROID_HOME=C:\Android\Sdk`, в `PATH` добавить `%ANDROID_HOME%\platform-tools`.
