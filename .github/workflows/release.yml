@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Тег для выпуска (например v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Сборка выпуска
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v4
+
+      - name: Определение тега
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Выпуск: $TAG"
+
+      # ── Прошивка ──────────────────────────────────────────────
+      - name: Установка arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+
+      - name: Установка ядра и библиотек
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "AudioTools" "Adafruit GFX Library" "Adafruit SSD1306"
+
+      - name: Сборка прошивки
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=921600" \
+            firmware/ESP32_BiAmp
+
+      - name: Упаковка прошивки в ZIP
+        run: |
+          VERSION="${{ steps.meta.outputs.tag }}"
+          mkdir -p release
+          cp "$(find . -name 'ESP32_BiAmp.ino.bin' | head -n1)" "release/firmware-$VERSION.bin"
+          cp "$(find . -name 'ESP32_BiAmp.ino.elf' | head -n1)" "release/firmware-$VERSION.elf" 2>/dev/null || true
+          cp firmware/DOCUMENTATION.md "release/DOCUMENTATION-$VERSION.md"
+          (cd release && zip -r "../esp32-biamp-$VERSION.zip" .)
+          ls -la "esp32-biamp-$VERSION.zip"
+
+      # ── Приложение ────────────────────────────────────────────
+      - name: Установка JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Указание пути к Android SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > android-app/local.properties
+
+      - name: Сборка APK
+        working-directory: android-app
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Выгрузка APK в релиз
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ESP32 Bi-Amp ${{ steps.meta.outputs.tag }}
+          body: |
+            ## Что в выпуске
+
+            | Файл | Назначение |
+            |---|---|
+            | `esp32-biamp-${{ steps.meta.outputs.tag }}.zip` | Образ прошивки + символы + документация |
+            | `app-release.apk` | Android-приложение |
+
+            ## Как прошить
+
+            ```bash
+            # Сначала прошейте прошивку, затем установите приложение —
+            # приложение проверяет версию протокола при подключении.
+            esptool.py --chip esp32 --port COM5 --baud 921600 \
+              write_flash 0x10000 firmware.bin
+            ```
+
+            Подробности — в [README](https://github.com/${{ github.repository }}#установка).
+
+          files: |
+            esp32-biamp-${{ steps.meta.outputs.tag }}.zip
+            android-app/app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true

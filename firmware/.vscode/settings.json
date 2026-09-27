@@ -1,0 +1,11 @@
+{
+  "arduino.skipVerifySignature": false,
+  "C_Cpp.default.compilerPath": "",
+  "files.associations": {
+    "*.ino": "cpp"
+  },
+  "files.eol": "\n",
+  "files.encoding": "utf8",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}

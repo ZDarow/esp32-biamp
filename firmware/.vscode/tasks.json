@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Сборка прошивки",
+      "type": "shell",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/tools/build.ps1"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Прошить (спросить порт)",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile", "-File", "${workspaceFolder}/tools/flash.ps1",
+        "-Port", "${input:port}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Мониторинг (спросить порт)",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile", "-File", "${workspaceFolder}/tools/monitor.ps1",
+        "-Port", "${input:port}", "-Seconds", "30"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "port",
+      "type": "promptString",
+      "description": "COM-порт платы (например COM5 или /dev/ttyUSB0)"
+    }
+  ]
+}

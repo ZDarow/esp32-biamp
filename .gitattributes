@@ -1,0 +1,37 @@
+# Нормализация переводов строк
+* text=auto eol=lf
+
+# Исходный код и скетчи
+*.ino       text eol=lf
+*.kt        text eol=lf
+*.kts       text eol=lf
+*.java      text eol=lf
+*.xml       text eol=lf
+*.md        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.ps1       text eol=lf
+*.txt       text eol=lf
+*.properties text eol=lf
+gradlew     text eol=lf
+gradlew.bat text eol=crlf
+
+# Двоичные файлы, которые обязаны храниться как есть
+*.jar       binary
+*.bin       binary
+*.elf       binary
+*.apk       binary
+*.aab       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.pcap      binary
+*.pcapng    binary
+
+# Документация
+*.md        diff=markdown
+*.md        text working-tree-encoding=UTF-8
