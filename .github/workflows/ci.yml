@@ -62,14 +62,17 @@ jobs:
         run: |
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=921600" \
+            --build-path "$PWD/.build/firmware" \
             --warnings all \
             firmware/ESP32_BiAmp
 
       - name: Проверка размера образа
         run: |
-          BIN=$(find . -name 'ESP32_BiAmp.ino.bin' | head -n1)
-          if [ -z "$BIN" ]; then
-            echo "::error::Не найден скомпилированный образ"
+          # Без --build-path arduino-cli собирает во временный каталог,
+          # который удаляется сразу после сборки.
+          BIN="$PWD/.build/firmware/ESP32_BiAmp.ino.bin"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::Не найден скомпилированный образ $BIN"
             exit 1
           fi
           SIZE=$(stat -c%s "$BIN")
@@ -84,7 +87,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: firmware-bin
-          path: "**/ESP32_BiAmp.ino.bin"
+          path: .build/firmware/ESP32_BiAmp.ino.bin
           retention-days: 14
           if-no-files-found: error
 

@@ -57,14 +57,20 @@ jobs:
         run: |
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=921600" \
+            --build-path "$PWD/.build/firmware" \
             firmware/ESP32_BiAmp
 
       - name: Упаковка прошивки в ZIP
         run: |
           VERSION="${{ steps.meta.outputs.tag }}"
+          BIN="$PWD/.build/firmware/ESP32_BiAmp.ino.bin"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::Не найден скомпилированный образ $BIN"
+            exit 1
+          fi
           mkdir -p release
-          cp "$(find . -name 'ESP32_BiAmp.ino.bin' | head -n1)" "release/firmware-$VERSION.bin"
-          cp "$(find . -name 'ESP32_BiAmp.ino.elf' | head -n1)" "release/firmware-$VERSION.elf" 2>/dev/null || true
+          cp "$BIN" "release/firmware-$VERSION.bin"
+          cp "$PWD/.build/firmware/ESP32_BiAmp.ino.elf" "release/firmware-$VERSION.elf" 2>/dev/null || true
           cp firmware/DOCUMENTATION.md "release/DOCUMENTATION-$VERSION.md"
           (cd release && zip -r "../esp32-biamp-$VERSION.zip" .)
           ls -la "esp32-biamp-$VERSION.zip"
