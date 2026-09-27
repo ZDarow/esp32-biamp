@@ -35,11 +35,23 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
 
+      - name: Подготовка sketchbook
+        run: |
+          export ARDUINO_DIRECTORIES_USER="$PWD/.arduino"
+          echo "ARDUINO_DIRECTORIES_USER=$PWD/.arduino" >> "$GITHUB_ENV"
+          mkdir -p "$PWD/.arduino/libraries"
+
       - name: Установка ядра и библиотек
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          arduino-cli lib install "audio-tools" "Adafruit GFX Library" "Adafruit SSD1306"
+          # audio-tools и ESP32-A2DP отсутствуют в реестре Arduino —
+          # публикуются только на GitHub, поэтому клонируются напрямую.
+          git clone --depth 1 --quiet https://github.com/pschatzmann/arduino-audio-tools.git \
+            "$ARDUINO_DIRECTORIES_USER/libraries/audio-tools"
+          git clone --depth 1 --quiet https://github.com/pschatzmann/ESP32-A2DP.git \
+            "$ARDUINO_DIRECTORIES_USER/libraries/ESP32-A2DP"
+          arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
 
       - name: Сборка прошивки
         run: |

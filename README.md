@@ -129,8 +129,23 @@ ESP32                Зона 1 (НЧ/ВЧ, левая)     Зона 2 (НЧ/В�
 ```bash
 arduino-cli core update-index
 arduino-cli core install esp32:esp32
-arduino-cli lib install "AudioTools" "Adafruit GFX Library" "Adafruit SSD1306"
+arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
 ```
+
+Две библиотеки — `audio-tools` и `ESP32-A2DP` — **отсутствуют в официальном
+реестре Arduino** и публикуются только на GitHub, поэтому ставятся вручную
+в каталог `libraries` вашего sketchbook:
+
+```bash
+git clone --depth 1 https://github.com/pschatzmann/arduino-audio-tools.git \
+  "$(arduino-cli config get directories.user)/libraries/audio-tools"
+git clone --depth 1 https://github.com/pschatzmann/ESP32-A2DP.git \
+  "$(arduino-cli config get directories.user)/libraries/ESP32-A2DP"
+```
+
+> Ключ `sketchbook.enable_git_url_install` в `arduino-cli` 1.5 по умолчанию
+> выключен, поэтому флаг `lib install --git-url` работает не всегда.
+> Вариант с `git clone` надёжнее.
 
 Дальше — PowerShell-скрипты из `firmware/tools/`:
 
@@ -327,8 +342,14 @@ HeapMin: 15860
 GPL-3.0-or-later. См. [LICENSE](LICENSE).
 
 Прошивка использует сторонние библиотеки под собственными лицензиями:
-AudioTools, BluetoothA2DPSink, BluetoothSerial, Adafruit GFX,
-Adafruit SSD1306, Arduino ESP32 core.
+
+| Библиотека | Источник | Лицензия |
+|---|---|---|
+| [arduino-audio-tools](https://github.com/pschatzmann/arduino-audio-tools) | GitHub, не в реестре Arduino | GPL-3.0 |
+| [ESP32-A2DP](https://github.com/pschatzmann/ESP32-A2DP) | GitHub, не в реестре Arduino | GPL-3.0 |
+| [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) | реестр Arduino | BSD-3-Clause |
+| [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) | реестр Arduino | BSD-3-Clause |
+| Arduino ESP32 core (`BluetoothSerial`, `Preferences`, `Wire`) | реестр Arduino | LGPL-2.1 |
 
 ---
 

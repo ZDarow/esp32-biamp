@@ -33,6 +33,14 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
           arduino-cli version
 
+      - name: Подготовка sketchbook
+        run: |
+          # Делаем каталог библиотек предсказуемым, чтобы сборка была
+          # воспроизводимой и не зависела от настроек раннера.
+          export ARDUINO_DIRECTORIES_USER="$PWD/.arduino"
+          echo "ARDUINO_DIRECTORIES_USER=$PWD/.arduino" >> "$GITHUB_ENV"
+          mkdir -p "$PWD/.arduino/libraries"
+
       - name: Установка ядра ESP32
         run: |
           arduino-cli core update-index
@@ -40,9 +48,13 @@ jobs:
 
       - name: Установка библиотек
         run: |
-          # Имя библиотеки в реестре Arduino — "audio-tools" (через дефис).
-          # "AudioTools" из репозитория GitHub в реестре отсутствует.
-          arduino-cli lib install "audio-tools"
+          # audio-tools и ESP32-A2DP отсутствуют в официальном реестре Arduino
+          # и распространяются только через GitHub, поэтому клонируются напрямую.
+          # Флаг --git-url в arduino-cli 1.5 отключён по умолчанию.
+          git clone --depth 1 --quiet https://github.com/pschatzmann/arduino-audio-tools.git \
+            "$ARDUINO_DIRECTORIES_USER/libraries/audio-tools"
+          git clone --depth 1 --quiet https://github.com/pschatzmann/ESP32-A2DP.git \
+            "$ARDUINO_DIRECTORIES_USER/libraries/ESP32-A2DP"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
 
@@ -111,9 +123,6 @@ jobs:
         run: |
           mkdir -p "$ANDROID_HOME"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Установка зависимостей
-        run: ./gradlew --no-daemon dependencies --configuration debugRuntimeClasspath
 
       - name: Сборка отладочной версии
         run: ./gradlew --no-daemon assembleDebug

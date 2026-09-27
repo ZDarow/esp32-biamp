@@ -1,5 +1,7 @@
 # ── Сборка и инструменты ───────────────────────────────────────────────
 # Артефакты прошивки (arduino-cli) и Android/Gradle
+.arduino/
+.arduino-cache/
 .build/
 build/
 */build/
