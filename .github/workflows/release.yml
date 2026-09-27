@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Копирование репозитория
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Определение тега
         id: meta
@@ -39,7 +39,7 @@ jobs:
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          arduino-cli lib install "AudioTools" "Adafruit GFX Library" "Adafruit SSD1306"
+          arduino-cli lib install "audio-tools" "Adafruit GFX Library" "Adafruit SSD1306"
 
       - name: Сборка прошивки
         run: |
@@ -59,7 +59,7 @@ jobs:
 
       # ── Приложение ────────────────────────────────────────────
       - name: Установка JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
