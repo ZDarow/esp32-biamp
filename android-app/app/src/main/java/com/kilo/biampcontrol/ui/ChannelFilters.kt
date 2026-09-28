@@ -41,16 +41,18 @@ fun ChannelFilters(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
              modifier = Modifier.padding(top = 6.dp))
         val hp = ds.chFilters.getOrElse(ch) { 0 to 0 }.first
         val lp = ds.chFilters.getOrElse(ch) { 0 to 0 }.second
-        ChFilterRow("HPF", hp, enabled) { vm.setChHp(ch, it.roundToInt()) }
-        ChFilterRow("LPF", lp, enabled) { vm.setChLp(ch, it.roundToInt()) }
+        ChFilterRow("HPF", name, hp, enabled) { vm.setChHp(ch, it.roundToInt()) }
+        ChFilterRow("LPF", name, lp, enabled) { vm.setChLp(ch, it.roundToInt()) }
     }
 }
 
 @Composable
-private fun ChFilterRow(label: String, valueHz: Int, enabled: Boolean, onFinished: (Float) -> Unit) {
+private fun ChFilterRow(label: String, channelName: String, valueHz: Int, enabled: Boolean,
+                        onFinished: (Float) -> Unit) {
     val on = valueHz > 0
     var pos by remember(label) { mutableFloatStateOf(if (valueHz > 0) valueHz.toFloat() else 200f) }
     LaunchedEffect(valueHz) { if (valueHz > 0) pos = valueHz.toFloat() }
+    val stateText = "$label $channelName, ${if (on) "$valueHz Гц" else "выключен"}"
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -62,15 +64,21 @@ private fun ChFilterRow(label: String, valueHz: Int, enabled: Boolean, onFinishe
         Spacer(Modifier.width(8.dp))
         Switch(
             checked = on, enabled = enabled,
-            onCheckedChange = { isOn -> onFinished(if (isOn) pos else 0f) }
+            onCheckedChange = { isOn -> onFinished(if (isOn) pos else 0f) },
+            modifier = Modifier.semanticsMerge("$label $channelName", null)
         )
     }
-    CompactSlider(
-        value = if (on) pos else 20f,
-        onValueChange = { pos = it },
-        onValueChangeFinished = { if (on) onFinished(pos) },
-        valueRange = 20f..20000f, steps = 0,
-        enabled = enabled && on,
-        modifier = Modifier.fillMaxWidth()
-    )
+    // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
+    Row(Modifier.fillMaxWidth().height(28.dp)) {
+        CompactSlider(
+            value = if (on) pos else 20f,
+            onValueChange = { pos = it },
+            onValueChangeFinished = { if (on) onFinished(pos) },
+            valueRange = 20f..20000f, steps = 0,
+            enabled = enabled && on,
+            contentDescription = "$label $channelName",
+            stateDescriptionText = stateText,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }

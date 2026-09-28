@@ -26,11 +26,33 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
 /**
- * Компактный слайдер: высота 28 dp (вместо стандартных ~48 dp).
+ * Добавляет слайдеру accessibility-семантику: объединяет дочерние узлы,
+ * задаёт имя (WCAG 2.5.3 «Label in Name») и текстовое состояние
+ * (WCAG 4.1.2 «Name, Role, Value»). Пустые значения не добавляются,
+ * чтобы не провоцировать замечания автоматических проверок.
+ */
+internal fun Modifier.semanticsMerge(name: String?, state: String?): Modifier =
+    semantics(mergeDescendants = true) {
+        if (!name.isNullOrEmpty()) contentDescription = name
+        if (!state.isNullOrEmpty()) stateDescription = state
+    }
+
+/**
+ * Компактный слайдер: трек 28 dp, зона касания расширена до 48 dp
+ * (требование доступности WCAG 2.5.5 / Material: минимальная цель касания 48 dp)
+ * за счёт `minimumInteractiveComponentSize()` — стандартного механизма Compose:
+ * он центрирует компонент внутри невидимого 48-dp окна и **уменьшает** занятую
+ * высоту до 28 dp, если родительский контейнер задан меньше (Row/Column с
+ * height(28.dp)). В отличие от height+отрицательного padding этот способ
+ * легален: Compose запрещает отрицательный padding.
+ * Зазор между ползунком и краями/соседними элементами — 8 dp.
  * Тап по треку — установка значения, перетаскивание — плавное изменение.
  * Основан на стандартном Material3 Slider с уменьшенной высотой.
  */
@@ -42,6 +64,8 @@ fun CompactSlider(
     valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
     steps: Int = 0,
     enabled: Boolean = true,
+    contentDescription: String? = null,
+    stateDescriptionText: String? = null,
     modifier: Modifier = Modifier
 ) {
     var pos by remember { mutableFloatStateOf(value) }
@@ -54,7 +78,10 @@ fun CompactSlider(
         valueRange = valueRange,
         steps = steps,
         enabled = enabled,
-        modifier = modifier.height(28.dp),
+        modifier = modifier
+            .padding(horizontal = 8.dp) // зазор между ползунком и краями/соседними элементами
+            .minimumInteractiveComponentSize() // зона касания 48 dp при видимых 28 dp
+            .semanticsMerge(contentDescription, stateDescriptionText),
         colors = SliderDefaults.colors(
             thumbColor = MaterialTheme.colorScheme.primary,
             activeTrackColor = MaterialTheme.colorScheme.primary,

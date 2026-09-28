@@ -115,14 +115,34 @@ CompactSlider(
 )
 ```
 
-**Автоматическая проверка доступности (API 34+):**
+**Автоматическая проверка доступности — только инструментированными тестами.**
+
+Проверки `tryPerformAccessibilityChecks()` выполняются **не** под Robolectric.
+Функция берёт валидатор из `PlatformTestContext.composeAccessibilityValidator`,
+а платформа Robolectric его всегда возвращает `null` — тест тихо ничего не
+проверяет и проходит. Метода `enableAccessibilityChecks()` в API Compose
+Test нет, так что включить проверку в unit-тестах нельзя.
+
+Корректный путь — `app/src/androidTest/` на реальном устройстве или эмуляторе:
 
 ```kotlin
-composeTestRule.enableAccessibilityChecks()
-composeTestRule.onRoot().tryPerformAccessibilityChecks()
-// Ловит: пустые contentDescription, малые цели касания,
-//        низкий контраст, неверный порядок обхода
+@RunWith(AndroidJUnit4::class)
+class AccessibilityTest {
+    @get:Rule
+    val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    fun sliderHasNoAccessibilityIssues() {
+        rule.setContent { LabeledSlider(/* … */) {} }
+        rule.onRoot().tryPerformAccessibilityChecks().assertExists()
+    }
+}
 ```
+
+Пока такой тест не написан, автоматическая гарантия доступности
+**отсутствует**. Семантика, добавленная вручную в интерфейсе
+(`contentDescription`, `stateDescription`, `semanticsMerge`), ничем
+не проверяется и требует ревью или ручной проверки TalkBack.
 
 ---
 
@@ -220,10 +240,11 @@ EQ — резко повышает интуитивность, пользова�
 | 1.2 | `mergeDescendants` + `contentDescription` + `stateDescription` на `LabeledSlider` | `ui/LabeledSlider.kt` |
 | 1.3 | То же на `EqRow`, `DelayRow`, `ChFilterRow` | `ui/DspTab.kt`, `ui/ChannelFilters.kt` |
 | 1.4 | `contentDescription` на элементы транспорта | `ui/VolumeTab.kt` |
-| 1.5 | Подключить `ui-test-junit4-accessibility`, прогнать `tryPerformAccessibilityChecks()` | новый `app/src/test/` |
+| 1.5 | ~~Подключить `ui-test-junit4-accessibility`, прогнать `tryPerformAccessibilityChecks()`~~ **Не выполнено:** проверки не работают под Robolectric (валидатор всегда `null`), тест проходил, ничего не проверяя. Перенесено в `app/src/androidTest/` как инструментированный тест — см. раздел 2 | — |
 
-**Проверка:** TalkBack на устройстве + прогон автотестов.
-**Ожидаемый эффект: 0 замечаний автоматической проверки.**
+**Проверка:** TalkBack на устройстве (сейчас — единственный рабочий способ).
+**Ожидаемый эффект:** пункты 1.1–1.4 осмысленно озвучиваются TalkBack.
+Автоматической проверки нет: пункт 1.5 не выполнен, см. раздел 2.
 
 ### Фаза 2 — Адаптивность (2–3 дня, риск: низкий)
 

@@ -591,6 +591,7 @@ private fun onLine(line: String) {
 | `ui/LabeledSlider.kt` | `LabeledSlider` (две перегрузки) |
 | `ui/CompactSlider.kt` | `CompactSlider` |
 | `ui/theme/Theme.kt` | `BiAmpTheme` |
+| `ui/theme/Color.kt` | константы палитры (`Blue400`, `DarkBackground` и др.) |
 
 **`CompactSlider`** — обёртка над Material3 `Slider` высотой 28 dp вместо стандартных 48.
 Низкий профиль нужен, потому что на вкладке DSP одновременно показано до 20 ползунков.
@@ -1088,7 +1089,7 @@ DSP считает коэффициенты фильтров в отдельно
 
 | Зависимость | Версия | Зачем |
 |---|---|---|
-| `androidx.compose:compose-bom` | 2024.12.01 | единая версия всех Compose-библиотек |
+| `androidx.compose:compose-bom` | 2025.09.00 | единая версия всех Compose-библиотек (Material3 1.4.0) |
 | `androidx.core:core-ktx` | 1.15.0 | `ContextCompat`, расширения Kotlin |
 | `androidx.activity:activity-compose` | 1.9.3 | `ComponentActivity`, `setContent` |
 | `androidx.compose.ui:ui` | из BOM | базовые примитивы Compose |

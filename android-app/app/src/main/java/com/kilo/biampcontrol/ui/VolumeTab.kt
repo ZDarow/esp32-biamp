@@ -87,10 +87,14 @@ fun VolumeTab(vm: BiAmpViewModel) {
 
         Text("Транспорт", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { vm.transport("prev") }, enabled = enabled) { Text("⏮") }
-            OutlinedButton(onClick = { vm.transport("play") }, enabled = enabled) { Text("▶") }
-            OutlinedButton(onClick = { vm.transport("pause") }, enabled = enabled) { Text("⏸") }
-            OutlinedButton(onClick = { vm.transport("next") }, enabled = enabled) { Text("⏭") }
+            OutlinedButton(onClick = { vm.transport("prev") }, enabled = enabled,
+                           modifier = Modifier.semanticsMerge("Предыдущий трек", null)) { Text("⏮") }
+            OutlinedButton(onClick = { vm.transport("play") }, enabled = enabled,
+                           modifier = Modifier.semanticsMerge("Воспроизвести", null)) { Text("▶") }
+            OutlinedButton(onClick = { vm.transport("pause") }, enabled = enabled,
+                           modifier = Modifier.semanticsMerge("Пауза", null)) { Text("⏸") }
+            OutlinedButton(onClick = { vm.transport("next") }, enabled = enabled,
+                           modifier = Modifier.semanticsMerge("Следующий трек", null)) { Text("⏭") }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
