@@ -28,6 +28,7 @@ def list_serial_ports() -> list[str]:
 class LineTransport(abc.ABC):
     def __init__(self) -> None:
         self._lines: queue.Queue[str] = queue.Queue()
+        self._pending = ""
         self._closed = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -62,7 +63,14 @@ class LineTransport(abc.ABC):
         self.write(command.encode("utf-8") + b"\n")
 
     def _feed(self, text: str) -> None:
-        for line in text.replace("\r", "\n").split("\n"):
+        self._pending += text
+        while "\n" in self._pending or "\r" in self._pending:
+            cut = min(
+                (self._pending.find(c) for c in "\r\n" if self._pending.find(c) >= 0),
+                default=-1,
+            )
+            line = self._pending[:cut]
+            self._pending = self._pending[cut + 1 :]
             if line.strip():
                 self._lines.put(line)
 
