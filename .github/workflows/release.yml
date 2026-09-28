@@ -89,6 +89,19 @@ jobs:
         working-directory: android-app
         run: ./gradlew --no-daemon assembleRelease
 
+      # В build.gradle.kts не задана signingConfig, поэтому AGP собирает
+      # app-release-unsigned.apk. Подписывающий ключ в репозитории нет
+      # и храниться он должен в секретах, а не в коде.
+      - name: Подготовка APK к выпуску
+        run: |
+          SRC=$(find android-app/app/build/outputs/apk/release -name 'app-release*.apk' | head -n1)
+          if [ -z "$SRC" ]; then
+            echo "::error::APK release не собран"
+            exit 1
+          fi
+          echo "Собран: $SRC"
+          cp "$SRC" "app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk"
+
       - name: Выгрузка APK в релиз
         uses: softprops/action-gh-release@v2
         with:
@@ -99,21 +112,33 @@ jobs:
 
             | Файл | Назначение |
             |---|---|
-            | `esp32-biamp-${{ steps.meta.outputs.tag }}.zip` | Образ прошивки + символы + документация |
-            | `app-release.apk` | Android-приложение |
+            | `esp32-biamp-${{ steps.meta.outputs.tag }}.zip` | Образ прошивки, символы, документация |
+            | `app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk` | Android-приложение |
+
+            > ⚠️ APK **не подписан**: ключ хранится в секретах репозитория,
+            > а не в коде. Самостоятельная сборка из исходников не требует
+            > подписи — `assembleDebug` даёт устанавливаемый файл.
 
             ## Как прошить
 
+            Извлеките образ из архива и прошейте его через USB:
+
             ```bash
-            # Сначала прошейте прошивку, затем установите приложение —
-            # приложение проверяет версию протокола при подключении.
             esptool.py --chip esp32 --port COM5 --baud 921600 \
-              write_flash 0x10000 firmware.bin
+              write_flash 0x10000 "firmware-${{ steps.meta.outputs.tag }}.bin"
+            ```
+
+            ## Как установить приложение
+
+            ```bash
+            # Либо соберите сами — подпись не требуется:
+            cd android-app && ./gradlew assembleDebug
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
             ```
 
             Подробности — в [README](https://github.com/${{ github.repository }}#установка).
 
           files: |
             esp32-biamp-${{ steps.meta.outputs.tag }}.zip
-            android-app/app/build/outputs/apk/release/app-release.apk
+            app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk
           fail_on_unmatched_files: true
