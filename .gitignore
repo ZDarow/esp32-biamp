@@ -55,3 +55,10 @@ gh_err.txt
 *.bak
 *.orig
 *.rej
+
+# Ключ подписи Android — только в секретах GitHub, никогда в репозитории
+*.p12
+*.jks
+*.keystore
+keystore.properties
+biamp-signing.properties

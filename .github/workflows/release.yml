@@ -85,22 +85,36 @@ jobs:
       - name: Указание пути к Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > android-app/local.properties
 
+      - name: Восстановление ключа подписи
+        run: |
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Секрет ANDROID_KEYSTORE_BASE64 не задан — выпуск без подписи недопустим"
+            exit 1
+          fi
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/biamp-release.p12"
+          chmod 600 "$RUNNER_TEMP/biamp-release.p12"
+          # Свойства Gradle с точками нельзя передать через ORG_GRADLE_PROJECT_*,
+          # поэтому имена без точек; см. app/build.gradle.kts
+          {
+            echo "ORG_GRADLE_PROJECT_biampStoreFile=$RUNNER_TEMP/biamp-release.p12"
+            echo "ORG_GRADLE_PROJECT_biampStorePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "ORG_GRADLE_PROJECT_biampKeyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "ORG_GRADLE_PROJECT_biampKeyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
+          echo "Ключ подписи восстановлен"
+
       - name: Сборка APK
         working-directory: android-app
         run: ./gradlew --no-daemon assembleRelease
 
-      # В build.gradle.kts не задана signingConfig, поэтому AGP собирает
-      # app-release-unsigned.apk. Подписывающий ключ в репозитории нет
-      # и храниться он должен в секретах, а не в коде.
-      - name: Подготовка APK к выпуску
+      - name: Проверка подписи APK
         run: |
-          SRC=$(find android-app/app/build/outputs/apk/release -name 'app-release*.apk' | head -n1)
-          if [ -z "$SRC" ]; then
-            echo "::error::APK release не собран"
+          APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Ожидался подписанный $APK, найдено: $(ls android-app/app/build/outputs/apk/release/)"
             exit 1
           fi
-          echo "Собран: $SRC"
-          cp "$SRC" "app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk"
+          echo "APK собран и подписан: $APK"
 
       - name: Выгрузка APK в релиз
         uses: softprops/action-gh-release@v2
@@ -113,11 +127,7 @@ jobs:
             | Файл | Назначение |
             |---|---|
             | `esp32-biamp-${{ steps.meta.outputs.tag }}.zip` | Образ прошивки, символы, документация |
-            | `app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk` | Android-приложение |
-
-            > ⚠️ APK **не подписан**: ключ хранится в секретах репозитория,
-            > а не в коде. Самостоятельная сборка из исходников не требует
-            > подписи — `assembleDebug` даёт устанавливаемый файл.
+            | `app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk` | Android-приложение, подписано |
 
             ## Как прошить
 
@@ -128,12 +138,16 @@ jobs:
               write_flash 0x10000 "firmware-${{ steps.meta.outputs.tag }}.bin"
             ```
 
-            ## Как установить приложение
+            ## Установка приложения
 
             ```bash
-            # Либо соберите сами — подпись не требуется:
+            adb install -r "app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk"
+            ```
+
+            Сборка из исходников подписи не требует:
+
+            ```bash
             cd android-app && ./gradlew assembleDebug
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
             ```
 
             Подробности — в [README](https://github.com/${{ github.repository }}#установка).
