@@ -157,9 +157,18 @@ jobs:
     steps:
       - name: Копирование репозитория
         uses: actions/checkout@v5
+        with:
+          # Полная история обязательна: gitleaks-action в режиме частичного
+          # сканирования вычисляет ревизию вида `^..` — родителя первого
+          # коммита. При fetch-depth: 1 он не загружен, git отклоняет
+          # неразрешимую ревизию, и проверка падает с
+          # "failed to scan Git repository: stderr is not empty"
+          fetch-depth: 0
 
       - name: Проверка на секреты
-        uses: gitleaks/gitleaks-action@v2
+        # v3 — версия на Node 24. v2 работает на Node 20, который выведен
+        # из GitHub-hosted runners, и перестаёт поддерживаться.
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

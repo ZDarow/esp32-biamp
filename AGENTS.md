@@ -108,6 +108,32 @@ cd android-app
 
 APK: `android-app\app\build\outputs\apk\debug\app-debug.apk`
 
+### Подпись релиза
+
+Релизный APK подписывается ключом, который лежит **только** в секретах
+GitHub и никогда в репозитории. Свойства Gradle: `biampStoreFile`,
+`biampStorePassword`, `biampKeyAlias`, `biampKeyPassword`.
+
+> ⚠️ **Имена свойств не должны содержать точки.** Gradle переводит
+> `ORG_GRADLE_PROJECT_a.b` в `a_b`, поэтому `biamp.signing.storeFile`
+> через переменные окружения не передаётся.
+
+Локальная сборка подписанного релиза:
+
+```powershell
+$env:ORG_GRADLE_PROJECT_biampStoreFile = "C:\путь\к\biamp-release.p12"
+$env:ORG_GRADLE_PROJECT_biampStorePassword = "<пароль>"
+$env:ORG_GRADLE_PROJECT_biampKeyAlias = "biamp"
+$env:ORG_GRADLE_PROJECT_biampKeyPassword = "<пароль>"
+.\gradlew.bat assembleRelease     # → app-release.apk (подписан)
+```
+
+Без этих переменных `assembleRelease` даёт `app-release-unsigned.apk` —
+это ожидаемо, сборка не падает.
+
+> 🚫 **Никогда не запускайте `gradlew properties`** — команда печатает все
+> свойства, включая пароль ключа, в консоль и журнал сессии.
+
 ### Обязательно перед коммитом
 
 ```powershell

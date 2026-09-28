@@ -4,6 +4,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Подпись релиза берётся из свойств Gradle. В CI их передаёт release.yml
+// из секретов репозитория через ORG_GRADLE_PROJECT_*; локально их можно
+// положить в ~/.gradle/gradle.properties или android-app/local.properties.
+// Имена без точек — обязательны: имя переменной окружения не может
+// содержать точку, а Gradle переводит ORG_GRADLE_PROJECT_a.b в a_b.
+// Если свойств нет, сборка релиза остаётся неподписанной: это осознанно,
+// ключ никогда не лежит в коде.
+val signStoreFile = providers.gradleProperty("biampStoreFile").orNull
+val signStorePass = providers.gradleProperty("biampStorePassword").orNull
+val signKeyAlias = providers.gradleProperty("biampKeyAlias").orNull
+val signKeyPass = providers.gradleProperty("biampKeyPassword").orNull
+val hasSigning = listOf(signStoreFile, signStorePass, signKeyAlias, signKeyPass)
+    .all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.kilo.biampcontrol"
     compileSdk = 35
@@ -16,8 +30,24 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        if (hasSigning) {
+            create("release") {
+                storeFile = file(signStoreFile!!)
+                storePassword = signStorePass
+                keyAlias = signKeyAlias
+                keyPassword = signKeyPass
+            }
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (hasSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
