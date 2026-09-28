@@ -28,7 +28,8 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    // BOM 2025.09.00 — последняя версия compose-bom, приносящая Material3 1.4.0 (стабильный)
+    implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui")
