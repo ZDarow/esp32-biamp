@@ -25,6 +25,10 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+
+    // Robolectric: unit-тесты работают с реальным (эмулированным) Android-манифестом,
+    // иначе Compose UI test не находит ComponentActivity ("Unable to resolve activity")
+    testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
 dependencies {
@@ -39,4 +43,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // Автоматические проверки доступности (tryPerformAccessibilityChecks) — Фаза 1 UI-PLAN
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    // Robolectric 4.14 + SDK 35 несовместимы (Build.FINGERPRINT == null), фиксирован sdk=34
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

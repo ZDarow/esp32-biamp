@@ -138,27 +138,35 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
                   onReset: () -> Unit, onFinished: (Float) -> Unit) {
     var pos by remember { mutableFloatStateOf(value) }
     LaunchedEffect(value) { pos = value }
+    val stateText = "${pos.roundToInt()} дБ"
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Text(String.format(Locale.US, "%.0f дБ", pos),
+        Text(stateText,
              style = MaterialTheme.typography.bodyMedium,
              color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(8.dp))
         OutlinedButton(
             onClick = onReset, enabled = enabled,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            modifier = Modifier.height(26.dp)
+            modifier = Modifier
+                .height(26.dp)
+                .semanticsMerge(label + ", сброс в 0 дБ", null)
         ) { Text("0", style = MaterialTheme.typography.bodySmall) }
     }
-    CompactSlider(
-        value = pos, onValueChange = { pos = it },
-        onValueChangeFinished = { onFinished(pos) },
-        valueRange = -12f..12f, steps = 23, enabled = enabled,
-        modifier = Modifier.fillMaxWidth()
-    )
+    // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
+    Row(Modifier.fillMaxWidth().height(28.dp)) {
+        CompactSlider(
+            value = pos, onValueChange = { pos = it },
+            onValueChangeFinished = { onFinished(pos) },
+            valueRange = -12f..12f, steps = 23, enabled = enabled,
+            contentDescription = label,
+            stateDescriptionText = stateText,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 // ── Задержка: подпись «N сэмплов (X,X мс)» ──
@@ -166,19 +174,25 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
 private fun DelayRow(label: String, value: Float, enabled: Boolean, onFinished: (Float) -> Unit) {
     var pos by remember { mutableFloatStateOf(value) }
     LaunchedEffect(value) { pos = value }
+    val stateText = "${pos.roundToInt()} сэмпл (${String.format(Locale.US, "%.1f", pos / 44.1f)} мс)"
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text("${pos.roundToInt()} сэмпл (${String.format(Locale.US, "%.1f", pos / 44.1f)} мс)",
+        Text(stateText,
              style = MaterialTheme.typography.bodyMedium,
              color = MaterialTheme.colorScheme.primary)
     }
-    CompactSlider(
-        value = pos, onValueChange = { pos = it },
-        onValueChangeFinished = { onFinished(pos) },
-        valueRange = 0f..MAX_DELAY_SAMPLES.toFloat(), steps = 0, enabled = enabled,
-        modifier = Modifier.fillMaxWidth()
-    )
+    // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
+    Row(Modifier.fillMaxWidth().height(28.dp)) {
+        CompactSlider(
+            value = pos, onValueChange = { pos = it },
+            onValueChangeFinished = { onFinished(pos) },
+            valueRange = 0f..MAX_DELAY_SAMPLES.toFloat(), steps = 0, enabled = enabled,
+            contentDescription = "Задержка, $label",
+            stateDescriptionText = stateText,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
