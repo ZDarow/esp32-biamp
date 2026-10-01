@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -62,6 +63,7 @@ import com.kilo.biampcontrol.ui.theme.BiAmpTheme
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -238,6 +240,34 @@ class MainScreenTest {
     }
 
     @Test
+    fun обеКрутилкиСтоятВОднойГоризонтали() {
+        runBlocking { client.deviceAnswers(*statusBlock.toTypedArray()) }
+        connected()
+        compose.onNodeWithText(str(R.string.tab_dsp)).performClick()
+        compose.waitForIdle()
+
+        val fc = compose.onNodeWithContentDescription(str(R.string.xo_fc))
+        val hpf = compose.onNodeWithContentDescription(str(R.string.subsonic_knob))
+        fc.performScrollTo()
+        compose.waitForIdle()
+
+        val a = fc.fetchSemanticsNode().boundsInRoot
+        val b = hpf.fetchSemanticsNode().boundsInRoot
+
+        // Рядом по горизонтали: ручки пересекаются по вертикали и не наезжают
+        // друг на друга. Именно это и требовалось — выставлять обе частоты,
+        // не прокручивая экран между ними.
+        assertTrue(
+            "Ручки не пересекаются по вертикали: fc=$a hpf=$b",
+            a.overlapsVertically(b)
+        )
+        assertTrue(
+            "Ручки стоят одна в другой: fc=$a hpf=$b",
+            b.left >= a.right || a.left >= b.right
+        )
+    }
+
+    @Test
     fun крутилкаПоказываетТекущееЗначение() {
         runBlocking { client.deviceAnswers(*statusBlock.toTypedArray()) }
         connected()
@@ -268,6 +298,16 @@ class MainScreenTest {
         compose.onNodeWithText(str(R.string.device_picker_title)).doesNotExist()
     }
 }
+
+/**
+ * Пересечение прямоугольников по вертикали.
+ *
+ * В `Rect` есть только `overlaps` (пересечение целиком), а тут нужно именно
+ * «ручки стоят на одной высоте», то есть общий вертикальный диапазон при
+ * разных горизонтальных.
+ */
+private fun Rect.overlapsVertically(other: Rect): Boolean =
+    top < other.bottom && other.top < bottom
 
 /**
  * Отсутствие узла проверяем через [SemanticsNodeInteraction.fetchSemanticsNode],

@@ -42,6 +42,13 @@ fun DspTab(vm: BiAmpViewModel) {
     val connected by vm.connState.collectAsState()
     val enabled = connected == ConnState.CONNECTED
 
+    // Выключенные секции оставляют Fc и HPF в памяти (их нечем менять, пока
+    // фильтры считаются как bypass), поэтому ручки остаются на месте и видимыми —
+    // просто задизейблены. Иначе при выключении секции они бы исчезли, и
+    // вторая ручка съезжала бы с места в горизонтальной линии.
+    val xoEnabled = enabled && ds.xoOn
+    val subEnabled = enabled && ds.subOn
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -51,7 +58,7 @@ fun DspTab(vm: BiAmpViewModel) {
     ) {
         Text(stringResource(R.string.dsp_title), style = MaterialTheme.typography.titleLarge)
 
-        // ── 1. Кроссовер: общий срез НФ/ВЧ-веток ─────────────────
+        // ── 1. Кроссовер и сабсоник: две крупные ручки в одну линию ──
         Text(stringResource(R.string.xo_title), style = MaterialTheme.typography.titleMedium)
         Caption(stringResource(R.string.xo_caption))
         Row(
@@ -70,17 +77,15 @@ fun DspTab(vm: BiAmpViewModel) {
             }
             Switch(checked = ds.xoOn, onCheckedChange = { vm.setXoOn(it) }, enabled = enabled)
         }
-        // Выключенный кроссовер оставляет значения Fc и типа в памяти
-        // (их нечем менять, пока секции считаются как bypass), поэтому
-        // элементы остаются видимыми — просто недоступными.
-        val xoEnabled = enabled && ds.xoOn
-        DialRow(
-            label = stringResource(R.string.xo_fc),
-            value = ds.fc,
-            range = 200f..1000f,
-            steps = 15,
-            enabled = xoEnabled
-        ) { vm.setFc(it.roundToInt()) }
+        Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
+                       label = { Text("Butterworth") }, enabled = xoEnabled,
+                       modifier = Modifier.weight(1f))
+            FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
+                       label = { Text("LR4") }, enabled = xoEnabled,
+                       modifier = Modifier.weight(1f))
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -90,23 +95,33 @@ fun DspTab(vm: BiAmpViewModel) {
                  modifier = Modifier.weight(1f))
             Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
         }
-        if (ds.subOn) {
-            DialRow(
+
+        // Обе частотные ручки стоят в одну горизонталь: их выставляют вместе,
+        // слушая один и тот же фрагмент записи, и вертикальный список заставлял
+        // прокручивать экран между ними. Подписи вынесены под ручки, иначе
+        // подписи наезжали бы друг на друга на узком экране.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.Top
+        ) {
+            DialKnob(
+                label = stringResource(R.string.xo_fc),
+                value = ds.fc,
+                range = 200f..1000f,
+                steps = 15,
+                enabled = xoEnabled,
+                modifier = Modifier.weight(1f)
+            ) { vm.setFc(it.roundToInt()) }
+
+            DialKnob(
                 label = stringResource(R.string.subsonic_knob),
                 value = ds.hp,
                 range = 20f..80f,
                 steps = 11,
-                enabled = enabled
+                enabled = subEnabled,
+                modifier = Modifier.weight(1f)
             ) { vm.setHp(it.roundToInt()) }
-        }
-        Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
-                       label = { Text("Butterworth") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
-            FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
-                       label = { Text("LR4") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
         }
 
         HorizontalDivider()
@@ -150,24 +165,25 @@ fun DspTab(vm: BiAmpViewModel) {
 }
 
 /**
- * Ручка с подписью и текущим значением.
+ * Ручка с подписью и текущим значением для горизонтальной линии.
  *
- * Подпись и число стоят под крутилкой, а не рядом: так взгляд идёт сверху
- * вниз по тому же порядку, в каком настройки перечислены в блоке, и большой
- * блок не разрастается по ширине.
+ * Подпись и число стоят под крутилкой, а не рядом: на две ручки в ряд ширины
+ * не хватает, и подпись сбоку выдавила бы вторую ручку за край экрана.
+ * Число набрано покрупнее подписи — на него смотрят, выставляя частоту.
  */
 @Composable
-private fun DialRow(
+private fun DialKnob(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onFinished: (Float) -> Unit
 ) {
     val stateText = sliderStateText(value, steps, " Гц")
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Dial(
@@ -176,15 +192,21 @@ private fun DialRow(
             onValueChangeFinished = onFinished,
             enabled = enabled,
             steps = steps,
+            diameter = 132.dp,
             label = label,
             stateText = stateText
         )
         Spacer(Modifier.height(4.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Text(
             stateText,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary
+            style = MaterialTheme.typography.titleLarge,
+            color = if (enabled) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline
         )
     }
 }
