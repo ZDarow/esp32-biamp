@@ -120,7 +120,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // Юнит-тесты для чистой логики: парсера status (bt/Protocol.kt) и DSP-математики
-    // графика (ui/FilterGraph.kt). Обе проверяются без устройства и без Android-рантайма.
+    // Юнит-тесты для чистой логики: парсер status (bt/Protocol.kt), очередь
+    // команд с троттлингом (bt/CommandSender.kt) и DSP-математика графика
+    // (ui/FilterGraph.kt). Всё проверяется без устройства и без Android-рантайма.
     testImplementation("junit:junit:4.13.2")
+    // Виртуальное время для тестов очереди команд: окно троттлинга в 150 мс
+    // иначе проверялось бы по скорости машины.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

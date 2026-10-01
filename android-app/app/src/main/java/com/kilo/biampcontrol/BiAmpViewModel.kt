@@ -83,6 +83,10 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     private fun requestStatusSync() {
         isSyncing.value = true
         syncRequestedAt = System.currentTimeMillis()
+        // Буфер очищается ДО отправки: недобранный хвост прошлого опроса
+        // не должен смешаться с новым блоком, иначе в состояние попадут
+        // значения двух разных моментов времени.
+        lineBuffer.clear()
         sender.send("status", true)
     }
 
@@ -219,7 +223,11 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     private fun onLine(line: String) {
         lineBuffer.addLast(line)
         if (lineBuffer.size > STATUS_LINES) lineBuffer.removeFirst()
-        StatusParser.parse(lineBuffer)?.let {
+        // Разбор идёт поверх текущего состояния, а не поверх значений по
+        // умолчанию: блок status приходит одиннадцатью строками, и на первых
+        // десяти в буфере ещё нет, например, строки Delay. Разбор с нуля
+        // обнулял бы эти поля, и ползунки прыгали бы к дефолту и обратно.
+        StatusParser.parse(lineBuffer, deviceState.value)?.let {
             deviceState.value = it
             // Полный блок status разобран — синхронизация завершена.
             if (isSyncing.value) isSyncing.value = false

@@ -147,4 +147,53 @@ class StatusParserTest {
         )!!
         assertEquals(listOf(true, false, true, false), s.inv)
     }
+
+    /**
+     * Блок status приходит одиннадцатью строками, поэтому на первых десяти
+     * ещё нет, например, `Delay`. Разбор поверх значений по умолчанию обнулял
+     * бы эти поля — ползунки прыгали бы к дефолту и обратно.
+     */
+    @Test
+    fun `непришедшие поля не сбрасываются на дефолт`() {
+        val base = DeviceState(vol0 = 38, vol1 = 38, fc = 350f, delays = listOf(7, 8, 9, 10))
+        val partial = blockV30.dropLast(1)   // без строки Delay
+
+        val s = StatusParser.parse(partial, base)!!
+
+        // Пришедшие строки обновляют состояние как обычно.
+        assertEquals(11, s.vol0)
+        assertEquals(11, s.vol1)
+        assertEquals(0f, s.bal, 1e-4f)
+        assertEquals(350f, s.fc, 0.1f)
+        assertEquals(listOf(31 to 3150, 0 to 0, 31 to 3150, 0 to 0), s.chFilters)
+        // А строка Delay ещё не пришла — её значение обязано уцелеть,
+        // иначе ползунки задержек прыгали бы к нулю на каждом обновлении.
+        assertEquals(listOf(7, 8, 9, 10), s.delays)
+    }
+
+    @Test
+    fun `слияние не восстанавливает состояние из пустого буфера`() {
+        assertNull(StatusParser.parse(emptyList(), DeviceState(vol0 = 38)))
+    }
+
+    @Test
+    fun `слияние не принимает мусор за состояние`() {
+        assertNull(StatusParser.parse(listOf("OK", ">"), DeviceState(vol0 = 38)))
+    }
+
+    /** Прошивка без `SPP:` в строке не должна гасить признак SPP. */
+    @Test
+    fun `старая строка BT не гасит признак SPP`() {
+        val base = DeviceState(sppOn = true)
+        val s = StatusParser.parse(listOf("BT: ON"), base)!!
+        assertTrue(s.btAudioOn)
+        assertTrue(s.sppOn)
+    }
+
+    @Test
+    fun `строка BT без SPP обрывает признак SPP если прошивка его сообщает`() {
+        val base = DeviceState(sppOn = true)
+        val s = StatusParser.parse(listOf("BT: ON | SPP: OFF"), base)!!
+        assertFalse(s.sppOn)
+    }
 }

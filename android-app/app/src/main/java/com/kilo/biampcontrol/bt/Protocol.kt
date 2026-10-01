@@ -36,8 +36,8 @@ data class DeviceState(
     val eql: Float = 0f,
     val eqm: Float = 0f,
     val eqh: Float = 0f,
-    val inv: List<Boolean> = listOf(false, false, false, false),
-val btAudioOn: Boolean = false,
+val inv: List<Boolean> = listOf(false, false, false, false),
+    val btAudioOn: Boolean = false,
     val sppOn: Boolean = false,
     val testMode: Int = 0,
     val testVol: Int = 6,                       // громкость тест-сигнала, %
@@ -74,9 +74,23 @@ object StatusParser {
      */
     fun isBlockEnd(line: String): Boolean = reDly.containsMatchIn(line)
 
-    /** Терпимый парсер: собирает состояние из любых подходящих строк буфера. */
-    fun parse(lines: List<String>): DeviceState? {
-        var s = DeviceState()
+/** Терпимый парсер: собирает состояние из любых подходящих строк буфера. */
+    fun parse(lines: List<String>): DeviceState? = parse(lines, DeviceState())
+
+    /**
+     * Парсер, который достраивает результат поверх уже известного состояния.
+     *
+     * Блок `status` приходит построчно, поэтому между первой и последней
+     * строкой в буфере лежит лишь часть полей. Если брать значения из
+     * конструктора по умолчанию, каждое промежуточное обновление обнуляло бы
+     * ещё не пришедшие поля: ползунки дёргались бы к дефолту и обратно,
+     * а режимы кроссовера и сабсоника мигали. За основу поэтому берётся
+     * [base] — текущее состояние UI, — и меняются только реально пришедшие строки.
+     *
+     * @return `null`, если в [lines] нет ни одной распознаваемой строки.
+     */
+    fun parse(lines: List<String>, base: DeviceState): DeviceState? {
+        var s = base
         var found = false
         for (l in lines) {
             reVol.find(l)?.let { m ->
@@ -109,10 +123,14 @@ object StatusParser {
             reInv.find(l)?.let { m ->
                 s = s.copy(inv = m.groupValues[1].map { it == '1' }); found = true
             }
-            reBt.find(l)?.let { m ->
+reBt.find(l)?.let { m ->
+                // У прошивки без поддержки `status` по SPP в строке есть только
+                // "BT: ON". Отсутствие группы — это «не сообщено», а не
+                // «SPP выключен»: иначе старый ответ гасил бы индикатор.
+                val spp = m.groupValues.getOrNull(2)
                 s = s.copy(
                     btAudioOn = m.groupValues[1] == "ON",
-                    sppOn = if (m.groupValues.size > 2) m.groupValues[2] == "ON" else false
+                    sppOn = if (spp.isNullOrEmpty()) s.sppOn else spp == "ON"
                 ); found = true
             }
             reTest.find(l)?.let { m ->

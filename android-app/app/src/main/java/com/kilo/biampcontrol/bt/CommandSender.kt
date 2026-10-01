@@ -30,7 +30,17 @@ import kotlinx.coroutines.channels.Channel
  * 150 мс на префикс, причём новое значение ВЫТЕСНЯЕТ старое.
  * Остальные команды (транспорт, пресеты, тесты) — немедленно.
  */
-class CommandSender(private val spp: SppManager, private val scope: CoroutineScope) {
+class CommandSender(
+    private val spp: SppTransport,
+    private val scope: CoroutineScope,
+    /**
+     * Источник времени для окна троттлинга. Продлён параметром, а не берётся
+     * из `System.currentTimeMillis()` внутри цикла, чтобы юнит-тест управлял
+     * часами виртуального времени: иначе проверка 150-миллисекундного окна
+     * зависела бы от скорости машины.
+     */
+    private val now: () -> Long = System::currentTimeMillis
+) {
 
     /**
      * Префиксы, по которым команда проходит через троттлинг.
@@ -40,10 +50,15 @@ class CommandSender(private val spp: SppManager, private val scope: CoroutineSco
      * вторая команда вытеснила бы первую — левый канал молча остался бы
      * на старой частоте. Номер канала в префиксе сохраняет независимость
      * каналов при общем ограничении частоты.
+     *
+     * `tvol:` — громкость тест-сигнала, такой же ползунок: без троттлинга
+     * он уходил в немедленную очередь и забивал SPP на каждом кадре
+     * перетаскивания, вытесняя оттуда команды транспорта.
      */
     private val throttlePrefixes = listOf(
         "vol:", "v0:", "v1:", "bal:", "fc:", "hp:",
         "tlf:", "thf:", "eql:", "eqm:", "eqh:",
+        "tvol:",
         "delay0:", "delay1:", "delay2:", "delay3:",
         "chhp:0:", "chhp:1:", "chhp:2:", "chhp:3:",
         "chlp:0:", "chlp:1:", "chlp:2:", "chlp:3:",
@@ -61,7 +76,7 @@ class CommandSender(private val spp: SppManager, private val scope: CoroutineSco
     }
 
     fun start(): Job = scope.launch {
-        lastBatchAt = System.currentTimeMillis()
+        lastBatchAt = now()
         while (isActive) {
             // 1) немедленные команды
             while (true) {
@@ -69,16 +84,21 @@ class CommandSender(private val spp: SppManager, private val scope: CoroutineSco
                 spp.sendLine(cmd)
             }
             // 2) накопленные «ползунковые» — пакетом раз в 150 мс
-            val now = System.currentTimeMillis()
-            if (now - lastBatchAt >= 150) {
+            val t = now()
+            if (t - lastBatchAt >= THROTTLE_MS) {
                 val batch = synchronized(pending) {
                     if (pending.isEmpty()) emptyList()
                     else { val l = pending.values.toList(); pending.clear(); l }
                 }
                 for (c in batch) spp.sendLine(c)
-                if (batch.isNotEmpty()) lastBatchAt = now
+                if (batch.isNotEmpty()) lastBatchAt = t
             }
             delay(25)
         }
+    }
+
+    private companion object {
+        /** Окно троттлинга «ползунковых» команд. */
+        const val THROTTLE_MS = 150L
     }
 }
