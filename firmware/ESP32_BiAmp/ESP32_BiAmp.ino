@@ -203,6 +203,12 @@ struct AudioParams {
   float vol[2];
   bool  mute[2];
   uint16_t dly[4];
+  // Перестановка выходов Л/П едет в снимке, а не живёт отдельной глобалкой:
+  // задача вывода читает ap только через refreshParams(), поэтому и swap
+  // обязан приходить тем же снимком. Отдельная переменная, которую читает
+  // audioTask, а пишет loop, — это гонка: компилятор вправе переставить
+  // чтение относительно записи, и кадр может уйти с перепутанными каналами.
+  bool  swap;
 };
 
 static AudioParams shadow_ap;            // владеет loop, пишется под ctrl_mux
@@ -354,6 +360,7 @@ void scheduleFilterUpdate() {
   tmp.vol[0] = vol_z[0]; tmp.vol[1] = vol_z[1];
   tmp.mute[0] = muted_z[0]; tmp.mute[1] = muted_z[1];
   for (uint8_t c = 0; c < 4; c++) { tmp.dly[c] = ch_delay[c]; }
+  tmp.swap = lr_swap;
   portENTER_CRITICAL(&ctrl_mux);
   memcpy(&shadow_ap, &tmp, sizeof(tmp));
   ap_dirty.store(true, std::memory_order_release);
@@ -512,13 +519,16 @@ void processBlock(const int16_t *in, int n) {
     }
     // Перестановка Л/П делается на готовых отсчётах, а не на входе:
     // так каналы меняются местами целиком, вместе со своей обработкой.
+    // Флаг берётся из ap — личного снимка задачи вывода, а не из общей
+    // переменной: иначе переключатель мог бы смениться посреди блока и
+    // половина кадра ушла бы в левый разъём, половина — в правый.
     int16_t *o1; int16_t *o2;
-    if (lr_swap) { o1 = bz2 + f * 2; o2 = bz1 + f * 2; }
+    if (ap.swap) { o1 = bz2 + f * 2; o2 = bz1 + f * 2; }
     else         { o1 = bz1 + f * 2; o2 = bz2 + f * 2; }
-    o1[0] = (int16_t)(out[lr_swap ? 2 : 0] * 32767);
-    o1[1] = (int16_t)(out[lr_swap ? 3 : 1] * 32767);
-    o2[0] = (int16_t)(out[lr_swap ? 0 : 2] * 32767);
-    o2[1] = (int16_t)(out[lr_swap ? 1 : 3] * 32767);
+    o1[0] = (int16_t)(out[ap.swap ? 2 : 0] * 32767);
+    o1[1] = (int16_t)(out[ap.swap ? 3 : 1] * 32767);
+    o2[0] = (int16_t)(out[ap.swap ? 0 : 2] * 32767);
+    o2[1] = (int16_t)(out[ap.swap ? 1 : 3] * 32767);
     // Замер окна границы потока: ищем максимум размаха, а не разницу между
     // отсчётами. Размах не зависит от того, попал ли сам щелчок в этот кадр:
     // если ступенька есть, она сделает максимум большим в любом случае.
@@ -1270,6 +1280,15 @@ void updateGeneralDisplay() {
   bool bt = bt_connected.load();
   bool play = is_playing.load();
   bool spp = SerialBT.hasClient();
+  // Громкость на OLED общая: два числа занимали обе нижние строки экрана и
+  // читались как отдельные каналы, хотя разъёмов у усилителя два стерео-входа,
+  // а слышно на выходе одно поле. Общее — среднее уровней; если каналы
+  // разошлись (bal), рядом ставится звёздочка: значит это не точное значение
+  // ни одного из них, и без неё показано было бы то, чего на самом деле нет.
+  float v0 = vol_z[0], v1 = vol_z[1];
+  int vavg = (int)(((v0 + v1) * 50.0f) + 0.5f);
+  if (vavg > 100) vavg = 100;
+  bool split = fabsf(v0 - v1) > 0.005f;
   disp.clearDisplay();
   disp.setTextSize(2); disp.setTextColor(SSD1306_WHITE);
   disp.setCursor(0, 0); disp.print(bt ? F("BT ON") : F("BT --"));
@@ -1278,9 +1297,12 @@ void updateGeneralDisplay() {
   if (muted_z[0] && muted_z[1]) disp.print(F("MUTED"));
   else disp.print(play ? F("PLAY") : F("PAUSE"));
   disp.setCursor(0, 32);
-  disp.print(F("L ")); disp.setCursor(28, 32); disp.print((int)(vol_z[0]*100)); disp.print(F("%"));
-  disp.setCursor(0, 48);
-  disp.print(F("R ")); disp.setCursor(28, 48); disp.print((int)(vol_z[1]*100)); disp.print(F("%"));
+  disp.print(F("VOL")); disp.setCursor(52, 32);
+  disp.print(vavg); disp.print(F("%"));
+  if (split) disp.print(F("*"));
+  // Баланс без громкости не показать: на OLED осталась свободная строка,
+  // и молчаливое место читалось бы как «баланс = 0».
+  if (split) { disp.setCursor(0, 48); disp.print(F("BAL")); disp.setCursor(52, 48); disp.print((int)(bal * 100.0f)); }
   disp.display();
 }
 
