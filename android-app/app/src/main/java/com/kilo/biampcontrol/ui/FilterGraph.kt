@@ -39,9 +39,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
+import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.DeviceState
 import java.util.Locale
 import kotlin.math.PI
@@ -314,14 +316,22 @@ private fun DrawScope.drawDbGrid(
 }
 
 /**
- * Имена четырёх каналов усилителя в порядке индексов ch_hp/ch_lp
+ * Идентификаторы имён четырёх каналов усилителя в порядке индексов ch_hp/ch_lp
  * (ESP32_BiAmp.ino:101: `Z1: LEFT_HF, LEFT_LF`, `Z2: RIGHT_HF, RIGHT_LF`).
  *
  * Единственный источник правды: список используют задержки и инверсия фазы.
  * Дублировать его опасно — рассинхрон по порядку сразу даст неверный канал
  * в командах chhp/chlp/delay/inv.
+ *
+ * Хранятся идентификаторы ресурсов, а не готовые строки: иначе подписи
+ * каналов остались бы единственным непереводимым текстом в приложении.
  */
-val CHANNEL_NAMES = listOf("НЧ-Л", "ВЧ-Л", "НЧ-П", "ВЧ-П")
+val CHANNEL_NAME_RES = listOf(
+    R.string.channel_lf,
+    R.string.channel_hf_l,
+    R.string.channel_lf_r,
+    R.string.channel_hf_r
+)
 
 /**
  * Полоса акустической системы: пара каналов стерео (левый и правый динамик
@@ -341,7 +351,7 @@ val CHANNEL_NAMES = listOf("НЧ-Л", "ВЧ-Л", "НЧ-П", "ВЧ-П")
  * ESP32_BiAmp.ino:343, `low = (c & 1) == 0`).
  */
 data class Band(
-    val title: String,
+    val titleRes: Int,
     val chLeft: Int,
     val chRight: Int,
     val levelTrim: (DeviceState) -> Float,
@@ -358,12 +368,12 @@ data class Band(
  */
 val BANDS = listOf(
     Band(
-        title = "СЧ-Динамики", chLeft = 0, chRight = 2,
+        titleRes = R.string.band_mid, chLeft = 0, chRight = 2,
         levelTrim = { it.tlf },
         setLevel = { vm, v -> vm.setTlf(v, true) }
     ),
     Band(
-        title = "ВЧ-Динамики", chLeft = 1, chRight = 3,
+        titleRes = R.string.band_high, chLeft = 1, chRight = 3,
         levelTrim = { it.thf },
         setLevel = { vm, v -> vm.setThf(v, true) }
     )
@@ -457,16 +467,18 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
     val mismatch = hp != hpRight || lp != lpRight
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        val bandTitle = stringResource(band.titleRes)
         ResponseGraph(
             resp = resp,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(200.dp)
                 .semanticsMerge(
-                    "АЧХ полосы ${band.title}: " +
-                        "ФВЧ ${hpFreqText(hpStep.pos)}, " +
-                        "ФНЧ ${hpFreqText(lpStep.pos)}, " +
-                        "уровень ${dbText(levelStep.pos)} дБ, крутизна 12 дБ на октаву",
+                    stringResource(
+                        R.string.graph_cd, bandTitle,
+                        hpFreqText(hpStep.pos), hpFreqText(lpStep.pos),
+                        dbText(levelStep.pos)
+                    ),
                     null
                 )
         )
@@ -476,7 +488,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
         Spacer(Modifier.height(12.dp))
 
         Text(
-            band.title,
+            bandTitle,
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center
@@ -493,7 +505,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
                 FilterChip(
                     selected = bandIndex == i,
                     onClick = { bandIndex = i },
-                    label = { Text(b.title) },
+                    label = { Text(stringResource(b.titleRes)) },
                     enabled = enabled,
                     modifier = Modifier.weight(1f)
                 )
@@ -502,16 +514,16 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
 
         Spacer(Modifier.height(12.dp))
 
-        StepperRow("ФВЧ ЧАСТОТА", hpStep.pos, band, enabled) { hz ->
+        StepperRow(stringResource(R.string.stepper_hp), hpStep.pos, band, enabled) { hz ->
             hpStep.set(hz)
             band.channels.forEach { vm.setChHp(it, hz) }
         }
-        StepperRow("ФНЧ ЧАСТОТА", lpStep.pos, band, enabled) { hz ->
+        StepperRow(stringResource(R.string.stepper_lp), lpStep.pos, band, enabled) { hz ->
             lpStep.set(hz)
             band.channels.forEach { vm.setChLp(it, hz) }
         }
         StepperRow(
-            label = "УРОВЕНЬ",
+            label = stringResource(R.string.stepper_level),
             valueText = dbText(levelStep.pos),
             enabled = enabled,
             onPrev = {
@@ -532,8 +544,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
 
         if (mismatch) {
             Text(
-                "Л и Р различаются (Л: $hp/$lp Гц, Р: $hpRight/$lpRight Гц). " +
-                    "Степпер записывает в оба канала.",
+                stringResource(R.string.mismatch_notice, hp, lp, hpRight, lpRight),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -543,8 +554,10 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
         val inverted = ds.inv.getOrElse(band.chLeft) { false } ||
             ds.inv.getOrElse(band.chRight) { false }
         StepperRow(
-            label = "ФАЗА",
-            valueText = if (inverted) "180 Градусов" else "0 Градусов",
+            label = stringResource(R.string.stepper_phase),
+            valueText = stringResource(
+                if (inverted) R.string.phase_180 else R.string.phase_0
+            ),
             enabled = enabled,
             onPrev = null,
             onNext = null,
@@ -552,14 +565,12 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
         )
 
         Text(
-            "Крутизна 12 дБ/окт (Q=0.71) зафиксирована прошивкой",
+            stringResource(R.string.slope_note),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "График и кнопки относятся только к полосе ${band.title}. " +
-                "Общий кроссовер (Fc, сабсоник) на нём не показан и применяется " +
-                "раньше — см. блок «Кроссовер — общий срез».",
+            stringResource(R.string.scope_note, bandTitle),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -589,8 +600,10 @@ internal fun dbText(db: Float): String =
     else String.format(Locale.US, "%.1f", db)
 
 /** Частота словами для accessibility: «выключен» вместо значения. */
+@Composable
 private fun hpFreqText(hz: Int): String =
-    if (hz >= MIN_FILTER_HZ) "$hz Гц" else "выключен"
+    if (hz >= MIN_FILTER_HZ) stringResource(R.string.filter_hz, hz)
+    else stringResource(R.string.filter_disabled)
 
 /**
  * Ступени частоты фильтра: 1/3 октавы от 20 Гц до 20 кГц, плюс «выкл».
@@ -615,16 +628,20 @@ internal fun nearestStep(hz: Int): Int {
  * до двух знаков и убираем хвостовые нули, иначе значение на экране не равно
  * тому, что уйдёт в прошивку, а соседние ступени (1600 и 2000) склеились бы
  * в одинаковую подпись при округлении до одного знака.
+ *
+ * Единицы измерения передаются параметрами, а не берутся из ресурсов:
+ * функция остаётся чистой и проверяется юнит-тестами, а локализованные
+ * подписи подставляет композабла.
  */
-internal fun freqValueText(hz: Int): String = when {
-    hz < MIN_FILTER_HZ -> "выкл"
+internal fun freqValueText(hz: Int, off: String, hzUnit: String, kHzUnit: String): String = when {
+    hz < MIN_FILTER_HZ -> off
     hz >= 1000 -> {
         val s = String.format(Locale.US, "%.2f", hz / 1000.0)
             .trimEnd('0')
             .trimEnd('.')
-        "${s}kГц"
+        s + kHzUnit
     }
-    else -> "${hz}Гц"
+    else -> hz.toString() + hzUnit
 }
 
 /**
@@ -641,7 +658,12 @@ private fun StepperRow(
     onStep: (Int) -> Unit
 ) = StepperRow(
     label = label,
-    valueText = freqValueText(value),
+    valueText = freqValueText(
+        value,
+        stringResource(R.string.filter_off),
+        stringResource(R.string.suffix_hz).trimStart(),
+        stringResource(R.string.filter_khz)
+    ),
     enabled = enabled,
     onPrev = {
         val cur = nearestStep(value)
@@ -683,7 +705,7 @@ private fun StepperRow(
             TextButton(
                 onClick = onPrev,
                 enabled = enabled,
-                modifier = Modifier.semanticsMerge("$label, уменьшить", null)
+                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_dec, label), null)
             ) { Text("<", style = MaterialTheme.typography.titleLarge) }
         }
         Surface(
@@ -704,14 +726,14 @@ private fun StepperRow(
             TextButton(
                 onClick = onNext,
                 enabled = enabled,
-                modifier = Modifier.semanticsMerge("$label, увеличить", null)
+                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_inc, label), null)
             ) { Text(">", style = MaterialTheme.typography.titleLarge) }
         } else {
             // Для параметра без шага (фаза) правая кнопка меняет значение.
             TextButton(
                 onClick = onReset,
                 enabled = enabled,
-                modifier = Modifier.semanticsMerge("$label, переключить", null)
+                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_toggle, label), null)
             ) { Text("⇄", style = MaterialTheme.typography.titleLarge) }
         }
     }

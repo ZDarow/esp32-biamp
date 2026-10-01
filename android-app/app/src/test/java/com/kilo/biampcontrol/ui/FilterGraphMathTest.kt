@@ -208,23 +208,40 @@ class FilterGraphMathTest {
         }
     }
 
+    /**
+     * Единицы измерения передаются явно: функция чистая и проверяется без
+     * Android-рантайма, а локализованные подписи подставляет композабла.
+     * Русские подписи берём из strings.xml вручную — так тест остаётся
+     * независимым от ресурсов.
+     */
+    private fun freq(hz: Int) = freqValueText(hz, "выкл", "Гц", "кГц")
+
     @Test
     fun `подпись частоты совпадает со спекой`() {
-        assertEquals("выкл", freqValueText(0))
-        assertEquals("80Гц", freqValueText(80))
-        assertEquals("999Гц", freqValueText(999))
-        assertEquals("1kГц", freqValueText(1000))
-        assertEquals("1.25kГц", freqValueText(1250))
-        assertEquals("1.6kГц", freqValueText(1600))
-        assertEquals("2kГц", freqValueText(2000))
-        assertEquals("20kГц", freqValueText(20000))
+        assertEquals("выкл", freq(0))
+        assertEquals("80Гц", freq(80))
+        assertEquals("999Гц", freq(999))
+        assertEquals("1кГц", freq(1000))
+        assertEquals("1.25кГц", freq(1250))
+        assertEquals("1.6кГц", freq(1600))
+        assertEquals("2кГц", freq(2000))
+        assertEquals("20кГц", freq(20000))
+    }
+
+    /** Английские единицы дают те же числа: проверяется сборка подписи, не язык. */
+    @Test
+    fun `подпись частоты собирается из переданных единиц`() {
+        assertEquals("off", freqValueText(0, "off", "Hz", "kHz"))
+        assertEquals("80Hz", freqValueText(80, "off", "Hz", "kHz"))
+        assertEquals("1.25kHz", freqValueText(1250, "off", "Hz", "kHz"))
+        assertEquals("20kHz", freqValueText(20000, "off", "Hz", "kHz"))
     }
 
     @Test
     fun `подписи ступеней не склеиваются`() {
         // 1600 и 2000 обязаны различаться, иначе соседние ступени неразличимы.
-        assertTrue(freqValueText(1600) != freqValueText(2000))
-        assertTrue(freqValueText(1250) != freqValueText(1600))
+        assertTrue(freq(1600) != freq(2000))
+        assertTrue(freq(1250) != freq(1600))
     }
 
     @Test

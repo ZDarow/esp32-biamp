@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Английский перевод. Ключи обязаны совпадать с res/values/strings.xml —
+  lint (MissingTranslation) падает на расхождении.
+-->
+<resources>
+
+    <string name="app_name">BiAmp Control</string>
+
+    <!-- Tabs and top bar -->
+    <string name="tab_volume">Volume</string>
+    <string name="tab_dsp">DSP</string>
+    <string name="tab_service">Service</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_connect">Connect</string>
+
+    <!-- Device picker -->
+    <string name="device_picker_title">Select device</string>
+    <string name="device_picker_empty">No paired devices.\nPair the phone with ESP32 BiAmp Speaker in Bluetooth settings first.</string>
+    <string name="auto_connect">Auto-connect</string>
+    <string name="forget_device">Forget device</string>
+    <string name="close">Close</string>
+    <string name="yes">Yes</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Volume tab -->
+    <string name="volume_title">Volume</string>
+    <string name="volume_both">Both</string>
+    <string name="volume_left">Left (L)</string>
+    <string name="volume_right">Right (R)</string>
+    <string name="volume_balance">Balance</string>
+    <string name="mute_left">Mute L</string>
+    <string name="mute_right">Mute R</string>
+    <string name="section_transport">Transport</string>
+    <string name="section_presets">Presets</string>
+    <string name="cd_prev">Previous track</string>
+    <string name="cd_play">Play</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_next">Next track</string>
+    <!-- Названия пресетов не переводятся: пользователь ищет их в руководстве -->
+    <string name="preset_flat">Flat</string>
+    <string name="preset_voice">Voice</string>
+    <string name="preset_night">Night</string>
+    <string name="preset_party">Party</string>
+
+    <!-- Service tab -->
+    <string name="service_title">Service</string>
+    <string name="section_speaker_test">Speaker test</string>
+    <string name="test_all">All</string>
+    <string name="test_low">LF</string>
+    <string name="test_high">HF</string>
+    <string name="test_anti">Anti</string>
+    <string name="test_sweep">Sweep</string>
+    <string name="test_off">STOP</string>
+    <string name="label_hz">Hz</string>
+    <string name="label_test_volume">Test volume</string>
+    <string name="section_diagnostics">Diagnostics</string>
+    <string name="syncing">Syncing with device…</string>
+    <string name="section_danger">Dangerous actions</string>
+    <string name="action_save">Save (save)</string>
+    <string name="action_reboot">Reboot (reboot)</string>
+    <string name="action_factory">Factory reset (factory)</string>
+    <string name="section_docs">Documentation</string>
+    <string name="docs_button">BiAmp Control — guide (v34)</string>
+    <string name="section_log">Log (last lines)</string>
+    <string name="docs_dialog_title">BiAmp Control — documentation</string>
+    <string name="docs_missing">Documentation not found in assets</string>
+    <string name="confirm_title">Confirm</string>
+    <string name="confirm_question">Run “%1$s”?</string>
+
+    <!-- DSP tab: crossover -->
+    <string name="dsp_title">DSP</string>
+    <string name="xo_title">Crossover — global split</string>
+    <string name="xo_caption">Splits the whole signal path into LF and HF branches. Works the same way for every driver and sets the base boundary that per-band filters are then added to.</string>
+    <string name="xo_switch">Crossover on</string>
+    <string name="xo_state_on">LF/HF split is active</string>
+    <string name="xo_state_off">Off: bands get one common path</string>
+    <string name="suffix_hz"> Hz</string>
+    <string name="subsonic_hpf">Subsonic HPF</string>
+    <string name="xo_type">Crossover type</string>
+
+    <!-- DSP tab: equaliser and bands -->
+    <string name="eq_title">Equaliser</string>
+    <string name="eq_low">Low 120Hz</string>
+    <string name="eq_mid">Mid 1kHz</string>
+    <string name="eq_high">High 6kHz</string>
+    <string name="eq_reset_cd">%1$s, reset to 0 dB</string>
+    <string name="band_title">Bands — per-band trim</string>
+    <string name="band_caption">Extra filters and level for a single band on top of the global crossover. Applied after it, so they can only narrow the band range, never widen it beyond Fc.</string>
+    <string name="phase_inversion">Phase inversion</string>
+    <string name="reset_inversion">Reset inversions</string>
+
+    <!-- Channel names: order matches ch_hp/ch_lp indices -->
+    <string name="channel_lf">LF-L</string>
+    <string name="channel_hf_l">HF-L</string>
+    <string name="channel_lf_r">LF-R</string>
+    <string name="channel_hf_r">HF-R</string>
+    <string name="band_mid">Mid drivers</string>
+    <string name="band_high">HF drivers</string>
+
+    <!-- Band steppers -->
+    <string name="stepper_hp">HPF FREQUENCY</string>
+    <string name="stepper_lp">LPF FREQUENCY</string>
+    <string name="stepper_level">LEVEL</string>
+    <string name="stepper_phase">PHASE</string>
+    <string name="phase_180">180 Degrees</string>
+    <string name="phase_0">0 Degrees</string>
+    <string name="graph_cd">Band response %1$s: HPF %2$s, LPF %3$s, level %4$s dB, slope 12 dB per octave</string>
+    <string name="mismatch_notice">L and R differ (L: %1$d/%2$d Hz, R: %3$d/%4$d Hz). The stepper writes both channels.</string>
+    <string name="slope_note">Slope 12 dB/oct (Q=0.71) is fixed by the firmware</string>
+    <string name="scope_note">The graph and buttons apply to band %1$s only. The global crossover (Fc, subsonic) is not shown here and is applied earlier — see the “Crossover — global split” block.</string>
+    <string name="stepper_dec">%1$s, decrease</string>
+    <string name="stepper_inc">%1$s, increase</string>
+    <string name="stepper_toggle">%1$s, toggle</string>
+    <string name="filter_hz">%1$d Hz</string>
+    <string name="filter_khz">kHz</string>
+    <string name="filter_disabled">disabled</string>
+    <string name="filter_off">off</string>
+
+</resources>

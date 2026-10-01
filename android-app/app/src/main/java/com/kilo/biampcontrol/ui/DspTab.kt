@@ -29,8 +29,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
+import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
 import kotlin.math.roundToInt
 
@@ -47,24 +49,21 @@ fun DspTab(vm: BiAmpViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("DSP", style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.dsp_title), style = MaterialTheme.typography.titleLarge)
 
-        // ── 1. Кроссовер: общий срез НЧ/ВЧ-веток ─────────────────
-        Text("Кроссовер — общий срез", style = MaterialTheme.typography.titleMedium)
-        Caption(
-            "Делит весь тракт на НЧ- и ВЧ-ветку. Работает одинаково для всех " +
-                "динамиков и задаёт базовую границу, к которой затем добавляются " +
-                "фильтры отдельных полос."
-        )
+        // ── 1. Кроссовер: общий срез НФ/ВЧ-веток ─────────────────
+        Text(stringResource(R.string.xo_title), style = MaterialTheme.typography.titleMedium)
+        Caption(stringResource(R.string.xo_caption))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Кроссовер вкл.", style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.xo_switch), style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    if (ds.xoOn) "Разделение НЧ/ВЧ активно"
-                    else "Выключен: полосы получают общий тракт",
+                    stringResource(
+                        if (ds.xoOn) R.string.xo_state_on else R.string.xo_state_off
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -75,19 +74,21 @@ fun DspTab(vm: BiAmpViewModel) {
         // (их нечем менять, пока секции считаются как bypass), поэтому
         // элементы остаются видимыми — просто недоступными.
         val xoEnabled = enabled && ds.xoOn
-        LabeledSlider("Fc", ds.fc, 200f..1000f, xoEnabled, " Гц", 15) { vm.setFc(it.roundToInt()) }
+        LabeledSlider("Fc", ds.fc, 200f..1000f, xoEnabled,
+            stringResource(R.string.suffix_hz), 15) { vm.setFc(it.roundToInt()) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Сабсоник HPF", style = MaterialTheme.typography.bodyLarge,
+            Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
                  modifier = Modifier.weight(1f))
             Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
         }
         if (ds.subOn) {
-            LabeledSlider("HPF", ds.hp, 20f..80f, enabled, " Гц", 11) { vm.setHp(it.roundToInt()) }
+            LabeledSlider("HPF", ds.hp, 20f..80f, enabled,
+                stringResource(R.string.suffix_hz), 11) { vm.setHp(it.roundToInt()) }
         }
-        Text("Тип кроссовера", style = MaterialTheme.typography.bodyLarge)
+        Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
                        label = { Text("Butterworth") }, enabled = xoEnabled,
@@ -100,39 +101,35 @@ fun DspTab(vm: BiAmpViewModel) {
         HorizontalDivider()
 
         // ── 2. Эквалайзер ────────────────────────────────────────
-        Text("Эквалайзер", style = MaterialTheme.typography.titleMedium)
-        EqRow("Low 120Hz", ds.eql, enabled, { vm.setEq(0, 0) }) { vm.setEq(0, it.roundToInt()) }
-        EqRow("Mid 1kHz",  ds.eqm, enabled, { vm.setEq(1, 0) }) { vm.setEq(1, it.roundToInt()) }
-        EqRow("High 6kHz", ds.eqh, enabled, { vm.setEq(2, 0) }) { vm.setEq(2, it.roundToInt()) }
+        Text(stringResource(R.string.eq_title), style = MaterialTheme.typography.titleMedium)
+        EqRow(stringResource(R.string.eq_low), ds.eql, enabled, { vm.setEq(0, 0) }) { vm.setEq(0, it.roundToInt()) }
+        EqRow(stringResource(R.string.eq_mid), ds.eqm, enabled, { vm.setEq(1, 0) }) { vm.setEq(1, it.roundToInt()) }
+        EqRow(stringResource(R.string.eq_high), ds.eqh, enabled, { vm.setEq(2, 0) }) { vm.setEq(2, it.roundToInt()) }
 
         HorizontalDivider()
 
         // ── 3. Полосы СЧ/ВЧ: точка подстройки поверх кроссовера ──
-        Text("Полосы — подстройка полосы", style = MaterialTheme.typography.titleMedium)
-        Caption(
-            "Дополнительные фильтры и уровень одной полосы поверх общего " +
-                "кроссовера. Применяются после него, поэтому могут только сузить " +
-                "диапазон полосы, но не расширить его за Fc."
-        )
+        Text(stringResource(R.string.band_title), style = MaterialTheme.typography.titleMedium)
+        Caption(stringResource(R.string.band_caption))
         FilterGraph(vm, ds, enabled)
 
         HorizontalDivider()
 
         // ── 5. Инверсия фазы ─────────────────────────────────────
-        Text("Инверсия фазы", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.phase_inversion), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CHANNEL_NAMES.forEachIndexed { ch, name ->
+            CHANNEL_NAME_RES.forEachIndexed { ch, res ->
                 FilterChip(
                     selected = ds.inv.getOrElse(ch) { false },
                     onClick = { vm.toggleInv(ch) },
-                    label = { Text(name) },
+                    label = { Text(stringResource(res)) },
                     enabled = enabled,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
         OutlinedButton(onClick = { vm.invOff() }, enabled = enabled,
-                       modifier = Modifier.fillMaxWidth()) { Text("Сброс инверсий") }
+                       modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.reset_inversion)) }
 
         Spacer(Modifier.height(8.dp))
     }
@@ -169,7 +166,7 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             modifier = Modifier
                 .height(26.dp)
-                .semanticsMerge(label + ", сброс в 0 дБ", null)
+                .semanticsMerge(stringResource(R.string.eq_reset_cd, label), null)
         ) { Text("0", style = MaterialTheme.typography.bodySmall) }
     }
     // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp

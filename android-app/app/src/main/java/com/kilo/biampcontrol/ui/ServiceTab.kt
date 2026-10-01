@@ -31,9 +31,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
+import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
 import java.nio.charset.StandardCharsets
 import kotlin.math.roundToInt
@@ -52,13 +54,17 @@ fun ServiceTab(vm: BiAmpViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Сервис", style = MaterialTheme.typography.titleLarge)
+Text(stringResource(R.string.service_title), style = MaterialTheme.typography.titleLarge)
 
-        Text("Тест динамиков", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.section_speaker_test), style = MaterialTheme.typography.titleMedium)
         val tests = listOf(
-            "all" to "Все", "woof" to "НЧ", "tweet" to "ВЧ",
+            "all" to stringResource(R.string.test_all),
+            "woof" to stringResource(R.string.test_low),
+            "tweet" to stringResource(R.string.test_high),
             "1" to "ch1", "2" to "ch2", "3" to "ch3", "4" to "ch4",
-            "anti" to "Анти", "sweep" to "Свип", "off" to "СТОП"
+            "anti" to stringResource(R.string.test_anti),
+            "sweep" to stringResource(R.string.test_sweep),
+            "off" to stringResource(R.string.test_off)
         )
         tests.chunked(5).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -82,7 +88,7 @@ fun ServiceTab(vm: BiAmpViewModel) {
             OutlinedTextField(
                 value = tfText,
                 onValueChange = { tfText = it.filter { c -> c.isDigit() } },
-                label = { Text("Гц") },
+                label = { Text(stringResource(R.string.label_hz)) },
                 enabled = enabled,
                 modifier = Modifier.weight(1f),
                 singleLine = true
@@ -96,7 +102,7 @@ fun ServiceTab(vm: BiAmpViewModel) {
         // Громкость тест-сигнала. Заводская 6 % — намеренно тихо, чтобы свип
         // и анти-фаза не били по ушам без присмотра.
         LabeledSlider(
-            label = "Громкость теста",
+            label = stringResource(R.string.label_test_volume),
             value = ds.testVol.toFloat(),
             range = 0f..100f,
             enabled = enabled,
@@ -106,12 +112,12 @@ fun ServiceTab(vm: BiAmpViewModel) {
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        Text("Диагностика", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.section_diagnostics), style = MaterialTheme.typography.titleMedium)
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (syncing) {
                     Text(
-                        "Синхронизация с устройством…",
+                        stringResource(R.string.syncing),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -137,22 +143,22 @@ fun ServiceTab(vm: BiAmpViewModel) {
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        Text("Опасные действия", style = MaterialTheme.typography.titleMedium)
-        DangerousButton("Сохранить (save)", enabled) { vm.saveParams() }
-        DangerousButton("Перезагрузка (reboot)", enabled) { vm.reboot() }
-        DangerousButton("Заводской сброс (factory)", enabled, isDestructive = true) { vm.factoryReset() }
-
-HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-        Text("Документация", style = MaterialTheme.typography.titleMedium)
-        OutlinedButton(
-            onClick = { showDoc = true },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("BiAmp Control — руководство (v15)") }
+Text(stringResource(R.string.section_danger), style = MaterialTheme.typography.titleMedium)
+        DangerousButton(stringResource(R.string.action_save), enabled) { vm.saveParams() }
+        DangerousButton(stringResource(R.string.action_reboot), enabled) { vm.reboot() }
+        DangerousButton(stringResource(R.string.action_factory), enabled, isDestructive = true) { vm.factoryReset() }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        Text("Лог (последние строки)", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.section_docs), style = MaterialTheme.typography.titleMedium)
+        OutlinedButton(
+            onClick = { showDoc = true },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(stringResource(R.string.docs_button)) }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        Text(stringResource(R.string.section_log), style = MaterialTheme.typography.titleMedium)
         Card(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp)) {
             Column(modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState())) {
                 log.takeLast(15).forEach { line ->
@@ -175,14 +181,14 @@ private fun DocDialog(onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("BiAmp Control — документация") },
+        title = { Text(stringResource(R.string.docs_dialog_title)) },
         text = {
             Column(modifier = Modifier.heightIn(max = 480.dp).verticalScroll(scroll)) {
                 lines.forEach { MdLine(it) }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
         },
         dismissButton = null
     )
@@ -221,9 +227,10 @@ private fun MdLine(item: MdLine) {
 }
 
 private fun loadDoc(ctx: Context): List<MdLine> {
+    val missing = ctx.getString(R.string.docs_missing)
     val raw = try {
         ctx.assets.open("BiAmpControl.md").use { it.readBytes().toString(StandardCharsets.UTF_8) }
-    } catch (_: Exception) { return listOf(MdLine("Документация не найдена в assets", 0, false, false)) }
+    } catch (_: Exception) { return listOf(MdLine(missing, 0, false, false)) }
     return raw.lineSequence().map { line ->
         val trimmed = line.trimEnd()
         val t = trimmed.trimStart()
@@ -262,18 +269,18 @@ private fun DangerousButton(
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            title = { Text("Подтверждение") },
-            text = { Text("Выполнить «$label»?") },
+title = { Text(stringResource(R.string.confirm_title)) },
+            text = { Text(stringResource(R.string.confirm_question, label)) },
             confirmButton = {
                 TextButton(
                     onClick = { onConfirm(); showDialog = false },
                     colors = if (isDestructive) ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     ) else ButtonDefaults.textButtonColors()
-                ) { Text("Да") }
+) { Text(stringResource(R.string.yes)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) { Text("Отмена") }
+                TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }

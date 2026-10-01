@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Строки приложения. Русский — язык по умолчанию (values/), английский —
+  в values-en/. Ни одного пользовательского текста в коде быть не должно:
+  иначе переводчик не найдёт его, а lint не подскажет, что строка потеряна.
+
+  Служебные строки (кнопки, названия команд протокола) в перевод не идут:
+  это точные имена, которые пользователь ищет в руководстве.
+-->
+<resources>
+
+    <string name="app_name">BiAmp Control</string>
+
+    <!-- Вкладки и верхняя панель -->
+    <string name="tab_volume">Громкость</string>
+    <string name="tab_dsp">DSP</string>
+    <string name="tab_service">Сервис</string>
+    <string name="action_disconnect">Откл.</string>
+    <string name="action_connect">Подкл.</string>
+
+    <!-- Окно выбора устройства -->
+    <string name="device_picker_title">Выберите устройство</string>
+    <string name="device_picker_empty">Нет сопряжённых устройств.\nСначала спарьте телефон с ESP32 BiAmp Speaker в настройках Bluetooth.</string>
+    <string name="auto_connect">Автоподключение</string>
+    <string name="forget_device">Забыть устройство</string>
+    <string name="close">Закрыть</string>
+    <string name="yes">Да</string>
+    <string name="cancel">Отмена</string>
+
+    <!-- Вкладка «Громкость» -->
+    <string name="volume_title">Громкость</string>
+    <string name="volume_both">Общая</string>
+    <string name="volume_left">Левая (L)</string>
+    <string name="volume_right">Правая (R)</string>
+    <string name="volume_balance">Баланс</string>
+    <string name="mute_left">Mute Л</string>
+    <string name="mute_right">Mute П</string>
+    <string name="section_transport">Транспорт</string>
+    <string name="section_presets">Пресеты</string>
+    <string name="cd_prev">Предыдущий трек</string>
+    <string name="cd_play">Воспроизвести</string>
+    <string name="cd_pause">Пауза</string>
+    <string name="cd_next">Следующий трек</string>
+    <string name="preset_flat">Flat</string>
+    <string name="preset_voice">Voice</string>
+    <string name="preset_night">Night</string>
+    <string name="preset_party">Party</string>
+
+    <!-- Вкладка «Сервис» -->
+    <string name="service_title">Сервис</string>
+    <string name="section_speaker_test">Тест динамиков</string>
+    <string name="test_all">Все</string>
+    <string name="test_low">НЧ</string>
+    <string name="test_high">ВЧ</string>
+    <string name="test_anti">Анти</string>
+    <string name="test_sweep">Свип</string>
+    <string name="test_off">СТОП</string>
+    <string name="label_hz">Гц</string>
+    <string name="label_test_volume">Громкость теста</string>
+    <string name="section_diagnostics">Диагностика</string>
+    <string name="syncing">Синхронизация с устройством…</string>
+    <string name="section_danger">Опасные действия</string>
+    <string name="action_save">Сохранить (save)</string>
+    <string name="action_reboot">Перезагрузка (reboot)</string>
+    <string name="action_factory">Заводской сброс (factory)</string>
+    <string name="section_docs">Документация</string>
+    <string name="docs_button">BiAmp Control — руководство (v34)</string>
+    <string name="section_log">Лог (последние строки)</string>
+    <string name="docs_dialog_title">BiAmp Control — документация</string>
+    <string name="docs_missing">Документация не найдена в assets</string>
+    <string name="confirm_title">Подтверждение</string>
+    <string name="confirm_question">Выполнить «%1$s»?</string>
+
+    <!-- Вкладка «DSP»: кроссовер -->
+    <string name="dsp_title">DSP</string>
+    <string name="xo_title">Кроссовер — общий срез</string>
+    <string name="xo_caption">Делит весь тракт на НЧ- и ВЧ-ветку. Работает одинаково для всех динамиков и задаёт базовую границу, к которой затем добавляются фильтры отдельных полос.</string>
+    <string name="xo_switch">Кроссовер вкл.</string>
+    <string name="xo_state_on">Разделение НЧ/ВЧ активно</string>
+    <string name="xo_state_off">Выключен: полосы получают общий тракт</string>
+    <string name="suffix_hz"> Гц</string>
+    <string name="subsonic_hpf">Сабсоник HPF</string>
+    <string name="xo_type">Тип кроссовера</string>
+
+    <!-- Вкладка «DSP»: эквалайзер и полосы -->
+    <string name="eq_title">Эквалайзер</string>
+    <string name="eq_low">Low 120Hz</string>
+    <string name="eq_mid">Mid 1kHz</string>
+    <string name="eq_high">High 6kHz</string>
+    <string name="eq_reset_cd">%1$s, сброс в 0 дБ</string>
+    <string name="band_title">Полосы — подстройка полосы</string>
+    <string name="band_caption">Дополнительные фильтры и уровень одной полосы поверх общего кроссовера. Применяются после него, поэтому могут только сузить диапазон полосы, но не расширить его за Fc.</string>
+    <string name="phase_inversion">Инверсия фазы</string>
+    <string name="reset_inversion">Сброс инверсий</string>
+
+    <!-- Имена каналов: порядок совпадает с индексами ch_hp/ch_lp -->
+    <string name="channel_lf">НЧ-Л</string>
+    <string name="channel_hf_l">ВЧ-Л</string>
+    <string name="channel_lf_r">НЧ-П</string>
+    <string name="channel_hf_r">ВЧ-П</string>
+    <string name="band_mid">СЧ-Динамики</string>
+    <string name="band_high">ВЧ-Динамики</string>
+
+    <!-- Степперы полосы -->
+    <string name="stepper_hp">ФВЧ ЧАСТОТА</string>
+    <string name="stepper_lp">ФНЧ ЧАСТОТА</string>
+    <string name="stepper_level">УРОВЕНЬ</string>
+    <string name="stepper_phase">ФАЗА</string>
+    <string name="phase_180">180 Градусов</string>
+    <string name="phase_0">0 Градусов</string>
+    <string name="graph_cd">АЧХ полосы %1$s: ФВЧ %2$s, ФНЧ %3$s, уровень %4$s дБ, крутизна 12 дБ на октаву</string>
+    <string name="mismatch_notice">Л и Р различаются (Л: %1$d/%2$d Гц, Р: %3$d/%4$d Гц). Степпер записывает в оба канала.</string>
+    <string name="slope_note">Крутизна 12 дБ/окт (Q=0.71) зафиксирована прошивкой</string>
+    <string name="scope_note">График и кнопки относятся только к полосе %1$s. Общий кроссовер (Fc, сабсоник) на нём не показан и применяется раньше — см. блок «Кроссовер — общий срез».</string>
+    <string name="stepper_dec">%1$s, уменьшить</string>
+    <string name="stepper_inc">%1$s, увеличить</string>
+    <string name="stepper_toggle">%1$s, переключить</string>
+    <string name="filter_hz">%1$d Гц</string>
+    <string name="filter_khz">кГц</string>
+    <string name="filter_disabled">выключен</string>
+    <string name="filter_off">выкл</string>
+
+</resources>

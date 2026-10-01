@@ -13,11 +13,22 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
 
     <application
-        android:label="BiAmp Control"
+        android:label="@string/app_name"
         android:icon="@android:drawable/stat_sys_data_bluetooth"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:supportsRtl="true"
+        android:localeConfig="@xml/locales_config"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true">
+        <!--
+          allowBackup="false" обязателен: в бэкап попадают адрес и имя
+          сопряжённого усилителя (DevicePrefs). Восстановление этого адреса на
+          другом телефоне даёт приложению цель для SPP-подключения к устройству,
+          которого на телефоне нет. fullBackupContent и dataExtractionRules
+          закрывают обе схемы копирования: для API 31+ и для API 30 и ниже.
+        -->
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

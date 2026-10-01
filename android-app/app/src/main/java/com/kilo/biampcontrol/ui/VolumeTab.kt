@@ -28,8 +28,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
+import com.kilo.biampcontrol.R
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -45,28 +47,28 @@ fun VolumeTab(vm: BiAmpViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Громкость", style = MaterialTheme.typography.titleLarge)
+Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.titleLarge)
 
         LabeledSlider(
-            label = "Общая", value = ds.vol0.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(), range = 0f..100f,
             enabled = enabled, suffix = "%"
         ) { vm.setVolBoth(it.roundToInt()) }
 
         // Левая зона
         LabeledSlider(
-            label = "Левая (L)", value = ds.vol0.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_left), value = ds.vol0.toFloat(), range = 0f..100f,
             enabled = enabled, suffix = "%"
         ) { vm.setVol0(it.roundToInt()) }
 
         // Правая зона
         LabeledSlider(
-            label = "Правая (R)", value = ds.vol1.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_right), value = ds.vol1.toFloat(), range = 0f..100f,
             enabled = enabled, suffix = "%"
         ) { vm.setVol1(it.roundToInt()) }
 
         // Баланс
         LabeledSlider(
-            label = "Баланс", value = ds.bal, range = -10f..10f,
+            label = stringResource(R.string.volume_balance), value = ds.bal, range = -10f..10f,
             enabled = enabled, suffix = "", steps = 19
         ) { vm.setBal(it.roundToInt()) }
 
@@ -75,33 +77,38 @@ fun VolumeTab(vm: BiAmpViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             FilterChip(
                 selected = muted0, onClick = { vm.toggleMute(0) },
-                label = { Text("Mute Л") }, enabled = enabled
+                label = { Text(stringResource(R.string.mute_left)) }, enabled = enabled
             )
             FilterChip(
                 selected = muted1, onClick = { vm.toggleMute(1) },
-                label = { Text("Mute П") }, enabled = enabled
+                label = { Text(stringResource(R.string.mute_right)) }, enabled = enabled
             )
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-        Text("Транспорт", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.section_transport), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { vm.transport("prev") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge("Предыдущий трек", null)) { Text("⏮") }
+                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_prev), null)) { Text("⏮") }
             OutlinedButton(onClick = { vm.transport("play") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge("Воспроизвести", null)) { Text("▶") }
+                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_play), null)) { Text("▶") }
             OutlinedButton(onClick = { vm.transport("pause") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge("Пауза", null)) { Text("⏸") }
+                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_pause), null)) { Text("⏸") }
             OutlinedButton(onClick = { vm.transport("next") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge("Следующий трек", null)) { Text("⏭") }
+                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_next), null)) { Text("⏭") }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-        Text("Пресеты", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.section_presets), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val presets = listOf("Flat", "Voice", "Night", "Party")
+            val presets = listOf(
+                stringResource(R.string.preset_flat),
+                stringResource(R.string.preset_voice),
+                stringResource(R.string.preset_night),
+                stringResource(R.string.preset_party)
+            )
             presets.forEachIndexed { i, name ->
                 OutlinedButton(
                     onClick = { vm.preset(i) }, enabled = enabled,

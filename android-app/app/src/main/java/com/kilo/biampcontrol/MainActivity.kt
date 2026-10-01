@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.activity.viewModels
@@ -108,10 +109,10 @@ fun MainScreen(vm: BiAmpViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showDevicePicker by remember { mutableStateOf(false) }
 
-    val tabs = listOf(
-        TabItem("Громкость", Icons.Default.GraphicEq),
-        TabItem("DSP", Icons.Default.Settings),
-        TabItem("Сервис", Icons.Default.Build)
+val tabs = listOf(
+        TabItem(stringResource(R.string.tab_volume), Icons.Default.GraphicEq),
+        TabItem(stringResource(R.string.tab_dsp), Icons.Default.Settings),
+        TabItem(stringResource(R.string.tab_service), Icons.Default.Build)
     )
 
     // Устройство выбирают один раз: дальше приложение помнит его и
@@ -125,7 +126,7 @@ fun MainScreen(vm: BiAmpViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("BiAmp Control") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     val color = when (connState) {
                         ConnState.CONNECTED -> Color(0xFF4CAF50)
@@ -153,13 +154,13 @@ fun MainScreen(vm: BiAmpViewModel) {
 
                     if (connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING) {
                         TextButton(onClick = { vm.disconnect() }) {
-                            Text("Откл.", color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(R.string.action_disconnect), color = MaterialTheme.colorScheme.error)
                         }
                     } else {
                         TextButton(onClick = {
                             vm.refreshDevices(ctx)
                             showDevicePicker = true
-                        }) { Text("Подкл.") }
+                        }) { Text(stringResource(R.string.action_connect)) }
                     }
                 }
             )
@@ -191,11 +192,11 @@ fun MainScreen(vm: BiAmpViewModel) {
         val remembered = vm.rememberedName
         AlertDialog(
             onDismissRequest = { showDevicePicker = false },
-            title = { Text("Выберите устройство") },
+            title = { Text(stringResource(R.string.device_picker_title)) },
             text = {
                 Column {
                     if (devices.isEmpty()) {
-                        Text("Нет сопряжённых устройств.\nСначала спарьте телефон с ESP32 BiAmp Speaker в настройках Bluetooth.")
+                        Text(stringResource(R.string.device_picker_empty))
                     }
                     devices.forEach { dev ->
                         TextButton(
@@ -215,7 +216,7 @@ fun MainScreen(vm: BiAmpViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Автоподключение", style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.auto_connect), style = MaterialTheme.typography.bodyMedium)
                                 Text(
                                     remembered,
                                     style = MaterialTheme.typography.bodySmall,
@@ -228,14 +229,14 @@ fun MainScreen(vm: BiAmpViewModel) {
                             )
                         }
                         TextButton(onClick = { vm.forgetDevice() }) {
-                            Text("Забыть устройство")
+                            Text(stringResource(R.string.forget_device))
                         }
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showDevicePicker = false }) { Text("Закрыть") }
+                TextButton(onClick = { showDevicePicker = false }) { Text(stringResource(R.string.close)) }
             }
         )
     }
