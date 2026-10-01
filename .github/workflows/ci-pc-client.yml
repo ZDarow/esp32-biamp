@@ -1,0 +1,50 @@
+name: 'CI: клиент для ПК'
+
+on:
+  push:
+    branches: [main, pc-client-dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Отменять предыдущий прогон при новом коммите в ту же ветку
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Файл принадлежит направлению pc-client — см. docs/BRANCHING.md.
+jobs:
+  pc-client:
+    name: Клиент ПК (unittest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: pc-client
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+
+      - name: Установка Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pc-client/requirements.txt
+
+      - name: Установка зависимостей
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Тесты написаны на unittest из стандартной библиотеки: pytest ради трёх
+      # файлов не нужен. Запуск идёт из корня pc-client, иначе пакет biamp
+      # не находится в sys.path.
+      - name: Юнит-тесты
+        run: python -m unittest discover -s tests -t . -v

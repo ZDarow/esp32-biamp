@@ -1,0 +1,71 @@
+name: 'CI: гигиена'
+
+on:
+  push:
+    branches: [main, firmware-dev, android-dev, pc-client-dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Отменять предыдущий прогон при новом коммите в ту же ветку
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Проверки сквозные: они читают весь репозиторий, но не принадлежат ни одному
+# направлению и потому живут отдельно от остальных workflow.
+jobs:
+  hygiene:
+    name: Гигиена репозитория
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+        with:
+          # Полная история обязательна: gitleaks-action в режиме частичного
+          # сканирования вычисляет ревизию вида `^..` — родителя первого
+          # коммита. При fetch-depth: 1 он не загружен, git отклоняет
+          # неразрешимую ревизию, и проверка падает с
+          # "failed to scan Git repository: stderr is not empty"
+          fetch-depth: 0
+
+      - name: Проверка на секреты
+        # v3 — версия на Node 24. v2 работает на Node 20, который выведен
+        # из GitHub-hosted runners, и перестаёт поддерживаться.
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Проверка лицензии
+        run: |
+          if [ ! -f LICENSE ]; then
+            echo "::error::Файл LICENSE отсутствует"
+            exit 1
+          fi
+          head -n1 LICENSE | grep -q "GNU GENERAL PUBLIC LICENSE" \
+            || { echo "::error::LICENSE не содержит текст GPL-3.0"; exit 1; }
+          echo "LICENSE на месте, лицензия GPL-3.0"
+
+      - name: Проверка запрещённых файлов
+        run: |
+          BAD=$(git ls-files | grep -Ei '\.(pcap|pcapng)$|^log\.txt$|local\.properties$|gh_(out|err)\.txt$' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::В репозитории обнаружены запрещённые файлы:"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "Запрещённых файлов нет"
+
+      - name: Проверка переводов строк
+        run: |
+          git config core.autocrlf false
+          if git grep -Il $'\r' -- '*.kt' '*.kts' '*.ino' '*.md' '*.ps1' '*.json' 2>/dev/null | head -n1 | grep -q .; then
+            echo "::error::Обнаружены файлы с CRLF в исходниках"
+            exit 1
+          fi
+          echo "Переводы строк в норме"

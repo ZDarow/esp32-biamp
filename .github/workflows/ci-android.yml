@@ -1,0 +1,71 @@
+name: 'CI: приложение Android'
+
+on:
+  push:
+    branches: [main, android-dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Отменять предыдущий прогон при новом коммите в ту же ветку
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Файл принадлежит направлению android — см. docs/BRANCHING.md.
+jobs:
+  android:
+    name: Приложение (Gradle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: android-app
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+
+      - name: Установка JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Кэширование Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android-app/**/*.gradle.kts', 'android-app/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Указание пути к Android SDK
+        run: |
+          mkdir -p "$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Сборка отладочной версии
+        run: ./gradlew --no-daemon assembleDebug
+
+      # Шаги ниже НЕ имеют continue-on-error: падение lint или тестов
+      # означает, что выгрузка APK небезопасна. Раньше обе проверки были
+      # необязательными, и красный прогон молча превращался в зелёный.
+      - name: Статический анализ
+        run: ./gradlew --no-daemon lintDebug
+
+      - name: Юнит-тесты
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Выгрузка APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: error

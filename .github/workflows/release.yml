@@ -11,11 +11,10 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
-# Те же зафиксированные версии, что и в ci.yml: выпуск обязан собираться
-# тем же кодом, который прошёл CI, иначе артефакты выпуска и проверки
-# разъезжаются.
+# Те же зафиксированные версии, что и в ci-*: выпуск обязан собираться тем же
+# кодом, который прошёл CI, иначе артефакты выпуска и проверки разъезжаются.
 env:
   ARDUINO_CLI_VERSION: '1.5.1'
   ARDUINO_CLI_SHA256: '28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b'
@@ -25,11 +24,18 @@ env:
   A2DP_TAG: 'v1.8.11'
   A2DP_COMMIT: 'b6da4744286ca15b6f1dee607c077a4747294dd4'
 
+# Выпуск — точка интеграции направлений, поэтому здесь он один, но шаги
+# разделены по независимым job'ам: правка прошивки и правка приложения больше
+# не делят один шаг и одну последовательность. Сам файл принадлежит
+# интеграции — см. docs/BRANCHING.md.
 jobs:
-  release:
-    name: Сборка выпуска
+  # ─────────────────────────────────────────────────────────────
+  # Образ прошивки
+  # ─────────────────────────────────────────────────────────────
+  firmware:
+    name: 'Выпуск: прошивка'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Копирование репозитория
@@ -42,7 +48,6 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Выпуск: $TAG"
 
-      # ── Прошивка ──────────────────────────────────────────────
       - name: Установка arduino-cli
         run: |
           set -euo pipefail
@@ -103,15 +108,54 @@ jobs:
           (cd release && zip -r "../esp32-biamp-$VERSION.zip" .)
           ls -la "esp32-biamp-$VERSION.zip"
 
-      # ── Приложение ────────────────────────────────────────────
+      - name: Выгрузка архива прошивки
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-firmware
+          path: esp32-biamp-${{ steps.meta.outputs.tag }}.zip
+          retention-days: 7
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # Android-приложение
+  # ─────────────────────────────────────────────────────────────
+  android:
+    name: 'Выпуск: приложение'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    defaults:
+      run:
+        working-directory: android-app
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+
+      - name: Определение тега
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Выпуск: $TAG"
+
       - name: Установка JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
+      - name: Кэширование Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android-app/**/*.gradle.kts', 'android-app/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Указание пути к Android SDK
-        run: echo "sdk.dir=$ANDROID_HOME" > android-app/local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Восстановление ключа подписи
         run: |
@@ -132,14 +176,13 @@ jobs:
           echo "Ключ подписи восстановлен"
 
       - name: Сборка APK
-        working-directory: android-app
         run: ./gradlew --no-daemon assembleRelease
 
       - name: Проверка подписи APK
         run: |
-          APK="android-app/app/build/outputs/apk/release/app-release.apk"
+          APK="app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK" ]; then
-            echo "::error::Ожидался подписанный $APK, найдено: $(ls android-app/app/build/outputs/apk/release/)"
+            echo "::error::Ожидался подписанный $APK, найдено: $(ls app/build/outputs/apk/release/)"
             exit 1
           fi
           echo "APK собран и подписан: $APK"
@@ -149,25 +192,60 @@ jobs:
           # Ниже в files указан app-esp32-biamp-$TAG.apk, а Gradle кладёт
           # app-release.apk. Без этого переименования шаг выгрузки падал бы
           # на fail_on_unmatched_files: выпуск не создавался вовсе.
-          # Переменная APK объявлена в предыдущем шаге в его оболочке,
-          # поэтому здесь путь повторяется.
           TAG="${{ steps.meta.outputs.tag }}"
-          cp "android-app/app/build/outputs/apk/release/app-release.apk" \
-             "app-esp32-biamp-$TAG.apk"
-          ls -la "app-esp32-biamp-$TAG.apk"
+          cp "app/build/outputs/apk/release/app-release.apk" \
+             "../app-esp32-biamp-$TAG.apk"
+          ls -la "../app-esp32-biamp-$TAG.apk"
 
-      - name: Выгрузка APK в релиз
+      - name: Выгрузка APK как артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk
+          retention-days: 7
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # Сборка релиза из артефактов обоих направлений
+  # ─────────────────────────────────────────────────────────────
+  upload:
+    name: Публикация выпуска
+    needs: [firmware, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+
+      - name: Скачивание артефактов
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Сборка файлов выпуска
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          cp "artifacts/release-firmware/esp32-biamp-$TAG.zip" .
+          cp "artifacts/release-android/app-esp32-biamp-$TAG.apk" .
+          ls -la "esp32-biamp-$TAG.zip" "app-esp32-biamp-$TAG.apk"
+
+      - name: Публикация в GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: ESP32 Bi-Amp ${{ steps.meta.outputs.tag }}
+          name: ESP32 Bi-Amp ${{ github.event.inputs.tag || github.ref_name }}
           body: |
             ## Что в выпуске
 
             | Файл | Назначение |
             |---|---|
-            | `esp32-biamp-${{ steps.meta.outputs.tag }}.zip` | Образ прошивки, символы, документация |
-            | `app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk` | Android-приложение, подписано |
+            | `esp32-biamp-${{ github.event.inputs.tag || github.ref_name }}.zip` | Образ прошивки, символы, документация |
+            | `app-esp32-biamp-${{ github.event.inputs.tag || github.ref_name }}.apk` | Android-приложение, подписано |
 
             ## Как прошить
 
@@ -175,13 +253,13 @@ jobs:
 
             ```bash
             esptool.py --chip esp32 --port COM5 --baud 921600 \
-              write_flash 0x10000 "firmware-${{ steps.meta.outputs.tag }}.bin"
+              write_flash 0x10000 "firmware-${{ github.event.inputs.tag || github.ref_name }}.bin"
             ```
 
             ## Установка приложения
 
             ```bash
-            adb install -r "app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk"
+            adb install -r "app-esp32-biamp-${{ github.event.inputs.tag || github.ref_name }}.apk"
             ```
 
             Сборка из исходников подписи не требует:
@@ -193,6 +271,6 @@ jobs:
             Подробности — в [README](https://github.com/${{ github.repository }}/blob/main/README.md).
 
           files: |
-            esp32-biamp-${{ steps.meta.outputs.tag }}.zip
-            app-esp32-biamp-${{ steps.meta.outputs.tag }}.apk
+            esp32-biamp-${{ github.event.inputs.tag || github.ref_name }}.zip
+            app-esp32-biamp-${{ github.event.inputs.tag || github.ref_name }}.apk
           fail_on_unmatched_files: true

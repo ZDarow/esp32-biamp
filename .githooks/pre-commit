@@ -1,0 +1,100 @@
+#!/bin/sh
+# Проверка владения путями: коммит не должен затрагивать файлы чужого
+# направления. Это и есть механизм разделения — долгоживущие ветки нужны
+# только как точки синхронизации, а конфликты снимаются запретом трогать
+# чужие файлы, а не разнесением веток.
+#
+# Владелец определяется по имени текущей ветки:
+#   firmware/*, firmware-dev  -> firmware
+#   android/*,  android-dev   -> android
+#   pc-client/*, pc-client-dev -> pc-client
+#   main, master, feature/*   -> проверка не выполняется
+#
+# Общие файлы (README, AGENTS, CONTRIBUTING, docs/, .githooks/) править
+# можно из любой ветки: они иначе и были бы источником конфликтов.
+#
+# Обход: git commit --no-verify  или  SKIP_PATH_OWNER=1 git commit ...
+
+set -u
+
+# Git выставляет эту переменную для вызовов из merge/rebase/cherry-pick:
+# там набор файлов задан индексом, а не волей автора.
+if [ "${SKIP_PATH_OWNER:-0}" = "1" ]; then
+	exit 0
+fi
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+case "$branch" in
+	firmware | firmware/* | firmware-*) owner="firmware" ;;
+	android | android/* | android-*) owner="android" ;;
+	pc-client | pc-client/* | pc-client-*) owner="pc-client" ;;
+	*) exit 0 ;;
+esac
+
+# Кто владеет путём: firmware | android | pc-client | shared | unknown
+path_owner() {
+	case "$1" in
+	firmware/* | SECURITY.md | .github/workflows/ci-firmware.yml) echo "firmware" ;;
+	android-app/* | .github/workflows/ci-android.yml) echo "android" ;;
+	pc-client/* | .github/workflows/ci-pc-client.yml) echo "pc-client" ;;
+	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE) echo "shared" ;;
+	.gitignore | .gitattributes | .editorconfig) echo "shared" ;;
+	docs/* | .githooks/*) echo "shared" ;;
+	.github/workflows/ci-hygiene.yml | .github/workflows/release.yml) echo "shared" ;;
+	*) echo "unknown" ;;
+	esac
+}
+
+own_label() {
+	case "$1" in
+	firmware) echo "прошивка (firmware)" ;;
+	android) echo "приложение Android (android)" ;;
+	pc-client) echo "клиент ПК (pc-client)" ;;
+	shared) echo "общий файл" ;;
+	*) echo "никем не описан" ;;
+	esac
+}
+
+blocked=""
+shared_touched=""
+
+for f in $(git diff --cached --name-only); do
+	f_owner=$(path_owner "$f")
+	case "$f_owner" in
+	"$owner") ;;
+	shared) shared_touched="$shared_touched $f" ;;
+	*)
+		blocked="$blocked $f"
+		;;
+	esac
+done
+
+if [ -n "$blocked" ]; then
+	echo "Отказ: ветка $branch принадлежит направлению «$(own_label "$owner")»,"
+	echo "а в коммите есть файлы других направлений."
+	echo ""
+	echo "Чужие файлы:"
+	for f in $blocked; do
+		echo "  $f  ->  $(own_label "$(path_owner "$f")")"
+	done
+	echo ""
+	echo "Как поступить:"
+	echo "  1. Убрать чужие файлы из индекса:  git restore --staged <файл>"
+	echo "  2. Создать отдельную ветку от main под эти файлы и смержить её."
+	echo "  3. Если правка всё же нужна здесь — описание в docs/BRANCHING.md,"
+	echo "     обход: git commit --no-verify"
+	echo ""
+	echo "Матрица владения: docs/BRANCHING.md, .github/CODEOWNERS"
+	exit 1
+fi
+
+if [ -n "$shared_touched" ]; then
+	echo "Замечание: вместе со своими файлами изменены общие."
+	echo "Общие файлы — источник конфликтов при слиянии, проверьте правку:"
+	for f in $shared_touched; do
+		echo "  $f"
+	done
+fi
+
+exit 0

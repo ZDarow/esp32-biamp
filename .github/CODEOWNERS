@@ -1,0 +1,50 @@
+# Владение путями и локальное разделение направлений
+#
+# Этот файл — декларация. Реально механику проверки включает локальный хук
+# .githooks/pre-commit (активируется один раз: git config core.hooksPath
+# .githooks). CODEOWNERS начнёт действовать после первого push на GitHub.
+#
+# Матрица дублируется в трёх местах намеренно: хук работает офлайн,
+# CODEOWNERS — на сервере, этот файл объясняет причину. При изменении
+# матрицы правьте все три.
+
+# ── Прошивка ESP32 ─────────────────────────────────────────────
+/firmware/                        @firmware
+/firmware/DOCUMENTATION.md        @firmware
+/firmware/ESP32_BiAmp/            @firmware
+/firmware/tools/                  @firmware
+/firmware/.vscode/                @firmware
+/SECURITY.md                      @firmware
+/.github/workflows/ci-firmware.yml @firmware
+
+# ── Приложение Android ────────────────────────────────────────
+/android-app/                     @android
+/android-app/docs/                @android
+/android-app/app/src/             @android
+/.github/workflows/ci-android.yml @android
+
+# ── Клиент для ПК ─────────────────────────────────────────────
+/pc-client/                       @pc-client
+/.github/workflows/ci-pc-client.yml @pc-client
+
+# ── Общие файлы ───────────────────────────────────────────────
+# Их правят все направления, поэтому конфликты здесь ожидаемы и
+# разрешаются вручную при слиянии. Правьте их отдельным коммитом,
+# чтобы конфликт был маленьким.
+/README.md                        @integrator
+/AGENTS.md                        @integrator
+/CONTRIBUTING.md                  @integrator
+/CODE_OF_CONDUCT.md               @integrator
+/LICENSE                          @integrator
+/.gitignore                       @integrator
+/.gitattributes                   @integrator
+/.editorconfig                    @integrator
+/docs/                            @integrator
+/.githooks/                       @integrator
+/.github/workflows/ci-hygiene.yml @integrator
+/.github/workflows/release.yml    @integrator
+
+# ── Всё остальное ─────────────────────────────────────────────
+# Новые файлы обязаны попасть в матрицу явно, иначе хук помечает их
+# как «никем не описан» и не даст закоммитить из чужой ветки.
+*                                 @integrator

@@ -1,8 +1,8 @@
-name: CI
+name: 'CI: прошивка'
 
 on:
   push:
-    branches: [main]
+    branches: [main, firmware-dev]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -18,6 +18,7 @@ permissions:
 # Версии инструментов зафиксированы: сборка вчера и сборка через месяц
 # должны давать один и тот же образ. Значения соответствуют локальной
 # рабочей сборке v34 и проверяются по тегам и хешам, а не «latest».
+# Файл принадлежит направлению firmware — см. docs/BRANCHING.md.
 env:
   ARDUINO_CLI_VERSION: '1.5.1'
   ARDUINO_CLI_SHA256: '28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b'
@@ -28,9 +29,6 @@ env:
   A2DP_COMMIT: 'b6da4744286ca15b6f1dee607c077a4747294dd4'
 
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  # Прошивка ESP32: сборка через arduino-cli
-  # ─────────────────────────────────────────────────────────────
   firmware:
     name: Прошивка (arduino-cli)
     runs-on: ubuntu-latest
@@ -126,114 +124,3 @@ jobs:
           path: .build/firmware/ESP32_BiAmp.ino.bin
           retention-days: 14
           if-no-files-found: error
-
-  # ─────────────────────────────────────────────────────────────
-  # Android-приложение: сборка, lint, юнит-тесты
-  # ─────────────────────────────────────────────────────────────
-  android:
-    name: Приложение (Gradle)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    defaults:
-      run:
-        working-directory: android-app
-
-    steps:
-      - name: Копирование репозитория
-        uses: actions/checkout@v5
-
-      - name: Установка JDK 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Кэширование Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android-app/**/*.gradle.kts', 'android-app/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-
-      - name: Указание пути к Android SDK
-        run: |
-          mkdir -p "$ANDROID_HOME"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Сборка отладочной версии
-        run: ./gradlew --no-daemon assembleDebug
-
-      # Шаги ниже НЕ имеют continue-on-error: падение lint или тестов
-      # означает, что выгрузка APK небезопасна. Раньше обе проверки были
-      # необязательными, и красный прогон молча превращался в зелёный.
-      - name: Статический анализ
-        run: ./gradlew --no-daemon lintDebug
-
-      - name: Юнит-тесты
-        run: ./gradlew --no-daemon testDebugUnitTest
-
-      - name: Выгрузка APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: android-app/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-          if-no-files-found: error
-
-  # ─────────────────────────────────────────────────────────────
-  # Гигиена репозитория
-  # ─────────────────────────────────────────────────────────────
-  hygiene:
-    name: Гигиена репозитория
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Копирование репозитория
-        uses: actions/checkout@v5
-        with:
-          # Полная история обязательна: gitleaks-action в режиме частичного
-          # сканирования вычисляет ревизию вида `^..` — родителя первого
-          # коммита. При fetch-depth: 1 он не загружен, git отклоняет
-          # неразрешимую ревизию, и проверка падает с
-          # "failed to scan Git repository: stderr is not empty"
-          fetch-depth: 0
-
-      - name: Проверка на секреты
-        # v3 — версия на Node 24. v2 работает на Node 20, который выведен
-        # из GitHub-hosted runners, и перестаёт поддерживаться.
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Проверка лицензии
-        run: |
-          if [ ! -f LICENSE ]; then
-            echo "::error::Файл LICENSE отсутствует"
-            exit 1
-          fi
-          head -n1 LICENSE | grep -q "GNU GENERAL PUBLIC LICENSE" \
-            || { echo "::error::LICENSE не содержит текст GPL-3.0"; exit 1; }
-          echo "LICENSE на месте, лицензия GPL-3.0"
-
-      - name: Проверка запрещённых файлов
-        run: |
-          BAD=$(git ls-files | grep -Ei '\.(pcap|pcapng)$|^log\.txt$|local\.properties$|gh_(out|err)\.txt$' || true)
-          if [ -n "$BAD" ]; then
-            echo "::error::В репозитории обнаружены запрещённые файлы:"
-            echo "$BAD"
-            exit 1
-          fi
-          echo "Запрещённых файлов нет"
-
-      - name: Проверка переводов строк
-        run: |
-          git config core.autocrlf false
-          if git grep -Il $'\r' -- '*.kt' '*.kts' '*.ino' '*.md' '*.ps1' '*.json' 2>/dev/null | head -n1 | grep -q .; then
-            echo "::error::Обнаружены файлы с CRLF в исходниках"
-            exit 1
-          fi
-          echo "Переводы строк в норме"
