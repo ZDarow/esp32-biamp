@@ -15,6 +15,18 @@ concurrency:
 permissions:
   contents: read
 
+# Версии инструментов зафиксированы: сборка вчера и сборка через месяц
+# должны давать один и тот же образ. Значения соответствуют локальной
+# рабочей сборке v34 и проверяются по тегам и хешам, а не «latest».
+env:
+  ARDUINO_CLI_VERSION: '1.5.1'
+  ARDUINO_CLI_SHA256: '28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b'
+  ESP32_CORE_VERSION: '3.3.12'
+  AUDIO_TOOLS_TAG: 'v1.2.5'
+  AUDIO_TOOLS_COMMIT: '2390c44fac3bdd1df40b80a088f00c9a203053b9'
+  A2DP_TAG: 'v1.8.11'
+  A2DP_COMMIT: 'b6da4744286ca15b6f1dee607c077a4747294dd4'
+
 jobs:
   # ─────────────────────────────────────────────────────────────
   # Прошивка ESP32: сборка через arduino-cli
@@ -30,7 +42,14 @@ jobs:
 
       - name: Установка arduino-cli
         run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+          # Раньше ставился install.sh с ветки master — он тянул всегда последнюю
+          # версию, и падение сборки через месяц невозможно было объяснить diff-ом.
+          # Теперь версия и хеш зафиксированы в env выше.
+          set -euo pipefail
+          URL="https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz"
+          curl -fsSL "$URL" -o /tmp/arduino-cli.tar.gz
+          echo "${ARDUINO_CLI_SHA256}  /tmp/arduino-cli.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/arduino-cli.tar.gz -C /usr/local/bin arduino-cli
           arduino-cli version
 
       - name: Подготовка sketchbook
@@ -43,20 +62,37 @@ jobs:
 
       - name: Установка ядра ESP32
         run: |
+          # Ядро тоже зафиксировано: без версии arduino-cli ставил новейшую,
+          # а поведение ядра между релизами меняется (например, дефолты I2S).
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
 
       - name: Установка библиотек
         run: |
           # audio-tools и ESP32-A2DP отсутствуют в официальном реестре Arduino
           # и распространяются только через GitHub, поэтому клонируются напрямую.
-          # Флаг --git-url в arduino-cli 1.5 отключён по умолчанию.
-          git clone --depth 1 --quiet https://github.com/pschatzmann/arduino-audio-tools.git \
+          # Клонируем по тегу и сверяем хеш коммита: тег в репозитории в принципе
+          # можно переставить, а хеш — нет.
+          set -euo pipefail
+          fetch() { # url, тег, ожидаемый коммит, каталог
+            git clone --depth 1 --branch "$2" --quiet "$1" "$4"
+            got="$(git -C "$4" rev-parse HEAD)"
+            if [ "$got" != "$3" ]; then
+              echo "::error::Тег $2 в $1 указывает на $got вместо $3"
+              exit 1
+            fi
+          }
+          fetch https://github.com/pschatzmann/arduino-audio-tools.git \
+            "$AUDIO_TOOLS_TAG" "$AUDIO_TOOLS_COMMIT" \
             "$ARDUINO_DIRECTORIES_USER/libraries/audio-tools"
-          git clone --depth 1 --quiet https://github.com/pschatzmann/ESP32-A2DP.git \
+          fetch https://github.com/pschatzmann/ESP32-A2DP.git \
+            "$A2DP_TAG" "$A2DP_COMMIT" \
             "$ARDUINO_DIRECTORIES_USER/libraries/ESP32-A2DP"
-          arduino-cli lib install "Adafruit GFX Library"
-          arduino-cli lib install "Adafruit SSD1306"
+          # Версии библиотек из реестра фиксируем явно: без этого arduino-cli
+          # ставил бы новейшие и сборка могла бы сломаться по чужому релизу.
+          # Значения соответствуют локальной рабочей сборке v34.
+          arduino-cli lib install "Adafruit GFX Library@1.12.6"
+          arduino-cli lib install "Adafruit SSD1306@2.5.17"
 
       - name: Сборка прошивки
         run: |
@@ -130,13 +166,14 @@ jobs:
       - name: Сборка отладочной версии
         run: ./gradlew --no-daemon assembleDebug
 
+      # Шаги ниже НЕ имеют continue-on-error: падение lint или тестов
+      # означает, что выгрузка APK небезопасна. Раньше обе проверки были
+      # необязательными, и красный прогон молча превращался в зелёный.
       - name: Статический анализ
         run: ./gradlew --no-daemon lintDebug
-        continue-on-error: true
 
       - name: Юнит-тесты
         run: ./gradlew --no-daemon testDebugUnitTest
-        continue-on-error: true
 
       - name: Выгрузка APK
         uses: actions/upload-artifact@v4

@@ -13,6 +13,18 @@ on:
 permissions:
   contents: write
 
+# Те же зафиксированные версии, что и в ci.yml: выпуск обязан собираться
+# тем же кодом, который прошёл CI, иначе артефакты выпуска и проверки
+# разъезжаются.
+env:
+  ARDUINO_CLI_VERSION: '1.5.1'
+  ARDUINO_CLI_SHA256: '28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b'
+  ESP32_CORE_VERSION: '3.3.12'
+  AUDIO_TOOLS_TAG: 'v1.2.5'
+  AUDIO_TOOLS_COMMIT: '2390c44fac3bdd1df40b80a088f00c9a203053b9'
+  A2DP_TAG: 'v1.8.11'
+  A2DP_COMMIT: 'b6da4744286ca15b6f1dee607c077a4747294dd4'
+
 jobs:
   release:
     name: Сборка выпуска
@@ -33,7 +45,11 @@ jobs:
       # ── Прошивка ──────────────────────────────────────────────
       - name: Установка arduino-cli
         run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+          set -euo pipefail
+          URL="https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz"
+          curl -fsSL "$URL" -o /tmp/arduino-cli.tar.gz
+          echo "${ARDUINO_CLI_SHA256}  /tmp/arduino-cli.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/arduino-cli.tar.gz -C /usr/local/bin arduino-cli
 
       - name: Подготовка sketchbook
         run: |
@@ -43,15 +59,27 @@ jobs:
 
       - name: Установка ядра и библиотек
         run: |
+          set -euo pipefail
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
           # audio-tools и ESP32-A2DP отсутствуют в реестре Arduino —
           # публикуются только на GitHub, поэтому клонируются напрямую.
-          git clone --depth 1 --quiet https://github.com/pschatzmann/arduino-audio-tools.git \
+          # По тегу и с проверкой хеша: тег переставить можно, хеш — нет.
+          fetch() {
+            git clone --depth 1 --branch "$2" --quiet "$1" "$4"
+            got="$(git -C "$4" rev-parse HEAD)"
+            if [ "$got" != "$3" ]; then
+              echo "::error::Тег $2 в $1 указывает на $got вместо $3"
+              exit 1
+            fi
+          }
+          fetch https://github.com/pschatzmann/arduino-audio-tools.git \
+            "$AUDIO_TOOLS_TAG" "$AUDIO_TOOLS_COMMIT" \
             "$ARDUINO_DIRECTORIES_USER/libraries/audio-tools"
-          git clone --depth 1 --quiet https://github.com/pschatzmann/ESP32-A2DP.git \
+          fetch https://github.com/pschatzmann/ESP32-A2DP.git \
+            "$A2DP_TAG" "$A2DP_COMMIT" \
             "$ARDUINO_DIRECTORIES_USER/libraries/ESP32-A2DP"
-          arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit GFX Library@1.12.6" "Adafruit SSD1306@2.5.17"
 
       - name: Сборка прошивки
         run: |
@@ -116,6 +144,18 @@ jobs:
           fi
           echo "APK собран и подписан: $APK"
 
+      - name: Подготовка APK к выгрузке
+        run: |
+          # Ниже в files указан app-esp32-biamp-$TAG.apk, а Gradle кладёт
+          # app-release.apk. Без этого переименования шаг выгрузки падал бы
+          # на fail_on_unmatched_files: выпуск не создавался вовсе.
+          # Переменная APK объявлена в предыдущем шаге в его оболочке,
+          # поэтому здесь путь повторяется.
+          TAG="${{ steps.meta.outputs.tag }}"
+          cp "android-app/app/build/outputs/apk/release/app-release.apk" \
+             "app-esp32-biamp-$TAG.apk"
+          ls -la "app-esp32-biamp-$TAG.apk"
+
       - name: Выгрузка APK в релиз
         uses: softprops/action-gh-release@v2
         with:
@@ -150,7 +190,7 @@ jobs:
             cd android-app && ./gradlew assembleDebug
             ```
 
-            Подробности — в [README](https://github.com/${{ github.repository }}#установка).
+            Подробности — в [README](https://github.com/${{ github.repository }}/blob/main/README.md).
 
           files: |
             esp32-biamp-${{ steps.meta.outputs.tag }}.zip
