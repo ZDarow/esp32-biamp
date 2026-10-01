@@ -19,13 +19,30 @@
 
 ---
 
+## Как разделены направления
+
+Репозиторий разделён по владению путями: у прошивки, приложения Android и
+клиента для ПК свои файлы и свои ветки (`firmware-dev`, `android-dev`,
+`pc-client-dev`). Правка чужого файла не пройдёт локальный pre-commit-хук.
+
+Перед первой правкой включите его:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Правила, список общих файлов и команды слияния — в
+[docs/BRANCHING.md](docs/BRANCHING.md).
+
+---
+
 ## Окружение
 
 ### Прошивка
 
 | Компонент | Версия |
 |---|---|
-| [arduino-cli](https://arduino-ide.github.io/arduino-cli/latest/installation/) | свежая |
+| [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | свежая |
 | ESP32 core | `esp32:esp32` 3.x |
 | PowerShell | 7 (pwsh) |
 
