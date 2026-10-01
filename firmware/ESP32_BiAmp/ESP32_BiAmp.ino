@@ -1,7 +1,7 @@
 /**
  * @file ESP32_BiAmp.ino
  * @brief Би-амп ESP32: приём A2DP-аудио и вывод на два I2S-порта,
- *        управление по Bluetooth SPP. Версия 33.
+ *        управление по Bluetooth SPP. Версия 34.
  *
  * Описание архитектуры, всех команд и диагностики — в firmware/DOCUMENTATION.md.
  *
@@ -52,6 +52,14 @@
  *             audio_state_cb: на паузе колбэк A2DP не приходит вовсе, и без
  *             сброса первый пакет нового потока посчитал бы всю паузу
  *             провалом (наблюдалось t=1 v=3075).
+ *        v34: щелчок на границах потока измерен прибором, а не на слух.
+ *             Команда click меряет размах выхода в первых 256 кадрах после
+ *             старта и в последнем блоке после гашения. Обычные счётчики
+ *             щелчок не видят: данные не теряются, неверно только начало
+ *             отсчёта. Контрольный прогон с отключённым сбросом (макрос
+ *             CLICK_PROBE_SELFTEST) дал Start max 1985 при уровне сигнала
+ *             168 — 1181% от сигнала, выход прыгал в 12 раз выше нужного.
+ *             С фиксом на том же устройстве: Start 0, Fade end 0.
  *
  * @author Kilo
  * @license GNU General Public License v3.0 or later
@@ -345,6 +353,31 @@ void scheduleFilterUpdate() {
   portEXIT_CRITICAL(&ctrl_mux);
 }
 
+// ===================== ЩЕЛЧОК НА ГРАНИЦАХ ПОТОКА ======================
+// Щелчок — это ступенька выхода там, где сигнала быть не должно: в начале
+// потока и в конце гашения. Проверять это на слух нельзя без акустики, и
+// обычные счётчики его не видят: ни Underrun, ни RingDrops, ни BadSamples при
+// щелчке не растут, потому что данные не теряются — неверно только начало
+// отсчёта.
+//
+// Поэтому измеряем амплитуду выхода в двух окнах: первые CLICK_PROBE_FRAMES
+// кадров после старта потока и последний блок после гашения. Обе величины
+// должны быть близки к нулю. Если бы ступенька осталась, они сравнялись бы с
+// уровнем сигнала: щелчок на полной громкости — это размах сигнала.
+//
+// Уровень сигнала (click_level) нужен как масштаб: он показывает, сколько
+// было бы слышно при ступеньке. Отношение start/level и есть искомый ответ.
+#define CLICK_PROBE_FRAMES 256
+static std::atomic<int32_t> click_probe{0};      // осталось кадров в окне
+static std::atomic<bool>    click_probe_armed{false};
+static uint32_t click_start_max[2] = {0, 0};
+static uint32_t click_fade_max[2] = {0, 0};
+static uint32_t click_level = 0;                  // типичный размах сигнала
+static uint32_t click_blk = 0;                   // счётчик блоков для выборки
+static uint8_t  click_dst = 0;                    // 0 — в start, 1 — в fade
+
+inline uint32_t abs16(int16_t v) { return (uint32_t)(v < 0 ? -(int32_t)v : v); }
+
 // ===================== DSP (только задача вывода) ========================
 inline float runSec(float x, uint8_t s, uint8_t sec) {
   float y = ap.cb[sec][0] * x + st1[s][sec];
@@ -473,12 +506,34 @@ void processBlock(const int16_t *in, int n) {
     }
     bz1[f * 2] = (int16_t)(out[0] * 32767); bz1[f * 2 + 1] = (int16_t)(out[1] * 32767);
     bz2[f * 2] = (int16_t)(out[2] * 32767); bz2[f * 2 + 1] = (int16_t)(out[3] * 32767);
+    // Замер окна границы потока: ищем максимум размаха, а не разницу между
+    // отсчётами. Размах не зависит от того, попал ли сам щелчок в этот кадр:
+    // если ступенька есть, она сделает максимум большим в любом случае.
+    if (click_probe_armed.load(std::memory_order_relaxed)) {
+      uint32_t m1 = abs16(bz1[f * 2]), m2 = abs16(bz2[f * 2]);
+      if (m1 > click_start_max[0] || m2 > click_start_max[1]) {
+        if (m1 > click_start_max[0]) click_start_max[0] = m1;
+        if (m2 > click_start_max[1]) click_start_max[1] = m2;
+      }
+      if (click_probe.fetch_sub(1, std::memory_order_relaxed) <= 1) {
+        click_probe_armed.store(false, std::memory_order_relaxed);
+        if (click_dst == 1) { click_fade_max[0] = click_start_max[0]; click_fade_max[1] = click_start_max[1]; }
+      }
+    }
   }
 
   uint32_t dsp_us = micros() - t_dsp;
   if (dsp_us > dsp_max_us.load(std::memory_order_relaxed)) dsp_max_us.store(dsp_us, std::memory_order_relaxed);
 
   size_t bytes = (size_t)n * 4;
+  // Масштаб для оценки щелчка: размах обычного сигнала раз в 64 блока, вне
+  // окон замера. Значения click_level и кликов сравниваются между собой.
+  if (!click_probe_armed.load(std::memory_order_relaxed) && ((click_blk++ & 63u) == 0)) {
+    for (int i = 0; i < n; i++) {
+      uint32_t m = abs16(bz1[i * 2]);
+      if (m > click_level) click_level = m;
+    }
+  }
   uint32_t t_wr = micros();
   bool w1 = (i2s_z1.write((uint8_t *)bz1, bytes) == bytes);
   bool w2 = (i2s_z2.write((uint8_t *)bz2, bytes) == bytes);
@@ -697,6 +752,12 @@ void resetDspState() {
   // Рампы громкости тоже к нулю: иначе на первом кадре усиление прыгнет
   // от значения, набранного до паузы.
   for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
+  // Замеряем первые кадры нового потока: если ступенька на старте есть, она
+  // попадёт в этот максимум.
+  click_start_max[0] = 0; click_start_max[1] = 0;
+  click_dst = 0;
+  click_probe.store(CLICK_PROBE_FRAMES, std::memory_order_relaxed);
+  click_probe_armed.store(true, std::memory_order_relaxed);
   logEvent(7, 0);
 }
 
@@ -730,7 +791,12 @@ void fadeOutDsp() {
     if (quiet) break;
   }
   dsp_fade = false;
-  // Последний блок нулевой целиком: DMA останавливается на тишине.
+  // Последний блок нулевой целиком: DMA останавливается на тишине. Замеряем
+  // его размах — это ответ на вопрос, остался ли щелчок на остановке.
+  click_start_max[0] = 0; click_start_max[1] = 0;
+  click_dst = 1;
+  click_probe.store(BLOCK_FRAMES, std::memory_order_relaxed);
+  click_probe_armed.store(true, std::memory_order_relaxed);
   processBlock(zbuf, BLOCK_FRAMES);
   for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
   logEvent(8, (uint16_t)frames);
@@ -1132,6 +1198,24 @@ void dispatchCommand(const char *cmd) {
     say("Delay: " + String(ch_delay[0]) + "/" + String(ch_delay[1]) + "/"
                 + String(ch_delay[2]) + "/" + String(ch_delay[3]));
   }
+  else if (strcmp(cmd, "click") == 0) {
+    // Щелчок не виден обычными счётчиками: данные не теряются, неверно только
+    // начало отсчёта. Поэтому сравниваем размах выхода на границах потока
+    // с размахом обычного сигнала — щелчок это размах сигнала, взятый
+    // в момент, когда сигнала быть не должно.
+    uint32_t lvl = click_level ? click_level : 1;
+    float start_db = 20.0f * log10f((float)(click_start_max[0] ? click_start_max[0] : 1) / 32768.0f);
+    float fade_db  = 20.0f * log10f((float)(click_fade_max[0] ? click_fade_max[0] : 1) / 32768.0f);
+    float lvl_db   = 20.0f * log10f((float)lvl / 32768.0f);
+    say("Signal level: " + String(click_level) + " (" + String(lvl_db, 1) + " dBFS)");
+    say("Start max: " + String(click_start_max[0]) + "/" + String(click_start_max[1])
+        + " (" + String(start_db, 1) + " dBFS)");
+    say("Fade end max: " + String(click_fade_max[0]) + "/" + String(click_fade_max[1])
+        + " (" + String(fade_db, 1) + " dBFS)");
+    say("Start rel: " + String((int)(100.0f * click_start_max[0] / lvl)) + "%  Fade rel: "
+        + String((int)(100.0f * click_fade_max[0] / lvl)) + "%");
+    say("Click window: " + String(click_probe_armed.load() ? "measuring" : "idle"));
+  }
   else if (strcmp(cmd, "stats") == 0) {
     say("Frames: " + String(g_in_frames.load()));
     say("Blocks: " + String(audio_blocks.load()) + " AF: " + String(audio_frames.load()) +
@@ -1162,7 +1246,7 @@ void dispatchCommand(const char *cmd) {
     say(F("tvol:N (test volume, default 6%)"));
     say(F("play pause next prev"));
     say(F("test:all/l/r/woof/tweet/1-4/anti/sweep/off tf:N"));
-    say(F("status stats evlog heap"));
+    say(F("status stats click evlog heap"));
     say(F("save reboot factory"));
   }
   ui_dirty.store(true);
