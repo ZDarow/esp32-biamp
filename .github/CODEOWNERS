@@ -36,6 +36,7 @@
 /CONTRIBUTING.md                  @integrator
 /CODE_OF_CONDUCT.md               @integrator
 /LICENSE                          @integrator
+/NOTICE                           @integrator
 /.gitignore                       @integrator
 /.gitattributes                   @integrator
 /.editorconfig                    @integrator

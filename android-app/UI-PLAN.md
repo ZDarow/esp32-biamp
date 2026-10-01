@@ -2,7 +2,7 @@
 
 **Дата:** 27.09.2026
 **Объект:** `android-app` (Android, Jetpack Compose, `com.kilo.biampcontrol`)
-**Устройство прошивки:** `firmware/ESP32_BiAmp/ESP32_BiAmp.ino` v29
+**Устройство прошивки:** `firmware/ESP32_BiAmp/ESP32_BiAmp.ino` v34
 
 > Документ создан по результатам исследования. Изменения в код не вносились.
 > Номера строк сверены с текущим состоянием репозитория.
@@ -59,7 +59,7 @@
 | API-умолчания доступности | `https://developer.android.com/develop/ui/compose/accessibility/api-defaults` |
 | Семантика | `https://developer.android.com/develop/ui/compose/accessibility/semantics` |
 | Тестирование доступности | `https://developer.android.com/develop/ui/compose/accessibility/testing` |
-| Размер цели касания | `https://support.google.com/accessibility/android/answer/7101858` |
+| Размер цели касания | `https://m3.material.io/components/buttons/guidelines` |
 | Codelab по доступности | `https://developer.android.com/codelabs/jetpack-compose-accessibility` |
 | KMP vs RN | `https://kotlinlang.org/docs/multiplatform/kotlin-multiplatform-react-native.html` |
 

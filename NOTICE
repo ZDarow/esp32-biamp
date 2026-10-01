@@ -1,0 +1,60 @@
+# NOTICE
+
+## Лицензия этого проекта
+
+Bi-Amp Control распространяется под **GPL-3.0-or-later** — то есть по условиям
+GNU General Public License версии 3 или, по вашему выбору, любой более поздней
+версии. Полный текст условий — в [LICENSE](LICENSE); NOTICE добавляет
+требованияGPLv3 об указании авторства и не отменяет их.
+
+```
+Bi-Amp Control — Copyright (C) 2026 ZDarow и участники проекта.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+```
+
+Оригинальные произведения сторонних авторов распространяются под их
+собственными лицензиями и принадлежат им. Ниже — составные части
+дистрибутива.
+
+## Составные части: прошивка
+
+| Компонент | Версия | Лицензия | Роль в проекте |
+|---|---|---|---|
+| [arduino-audio-tools](https://github.com/pschatzmann/arduino-audio-tools) | `2390c44f` (тег v1.2.5) | GPL-3.0 | I2S, ресемплирование, кодеки |
+| [ESP32-A2DP](https://github.com/pschatzmann/ESP32-A2DP) | `b6da4744` (тег v1.8.11) | Apache-2.0 | стек Bluetooth, A2DP sink |
+| [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) | 1.12.6 | BSD-3-Clause | отрисовка текста на OLED |
+| [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) | 2.5.17 | BSD-3-Clause | драйвер дисплея |
+| [Arduino core for ESP32](https://github.com/espressif/arduino-esp32) | 3.3.12 | LGPL-2.1 | `BluetoothSerial`, `Preferences`, `Wire`, FreeRTOS |
+
+Версии зафиксированы в [`.github/workflows/ci-firmware.yml`](.github/workflows/ci-firmware.yml)
+и проверяются по тегам и хешам коммитов, а не по `latest`: поведение ядра и
+библиотек между релизами меняется и ломает воспроизводимость сборки.
+
+## Составные части: приложения
+
+| Компонент | Лицензия |
+|---|---|
+| Jetpack Compose, AndroidX | Apache-2.0 |
+| Kotlin stdlib и coroutines | Apache-2.0 |
+| Material Icons Extended | Apache-2.0 |
+
+Приложение (`com.kilo.biampcontrol`) не содержит стороннего кода, собранного
+в репозиторий: все зависимости приходят из Maven и распространяются в
+соответствии со своими лицензиями.
+
+## Составные части: клиент для ПК
+
+| Компонент | Лицензия |
+|---|---|
+| [PySerial](https://pypi.org/project/pyserial/) | BSD-3-Clause |
+
+Остальное — стандартная библиотека Python.

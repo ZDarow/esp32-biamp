@@ -480,5 +480,5 @@ indent_style = space
 10. [MatthewKerns/software-development-best-practices-guide](https://github.com/MatthewKerns/software-development-best-practices-guide)
 11. [Android Developers — Compose Architectural Layering](https://developer.android.com/develop/ui/compose/layering)
 12. [KotlinConf 2026 — Gradle Talks](https://blog.gradle.org/gradle-at-kotlinconf-2026)
-13. [Medium — Complete Guide: CI/CD for Android Apps with GitHub Actions](https://medium.com/@satyamkrjha85/complete-guide-setting-up-ci-cd-for-android-apps-with-github-actions-firebase-play-store-5b942208473a)
+13. [GitHub Actions — Building and testing Java with Gradle](https://docs.github.com/en/actions/tutorials/build-and-test-code/java-with-gradle) — вместо сторонней статьи на Medium, которая отдаёт 403 автоматическим проверкам ссылок
 14. [KMP CI Tutorial — Kotlin Documentation](https://kotlinlang.org/docs/multiplatform/kmp-ci-tutorial.html)

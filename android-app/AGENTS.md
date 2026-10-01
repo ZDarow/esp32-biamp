@@ -31,7 +31,7 @@ CommandSender (очередь + троттлинг) → SppManager (RFCOMM)
 - `ConnState`: `DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`.
 - Сокет — только на `Dispatchers.IO`.
 
-## Протокол (источник истины — прошивка `firmware/ESP32_BiAmp/ESP32_BiAmp.ino`, версия v29)
+## Протокол (источник истины — прошивка `firmware/ESP32_BiAmp/ESP32_BiAmp.ino`, версия v34)
 - SPP/RFCOMM, UUID `00001101-0000-1000-8000-00805F9B34FB`, устройство `ESP32 BiAmp Speaker`.
 - Команды — строки нижнего регистра, терминатор `\n` (принимает и `\r`), макс. 63 символа + терминатор.
 - Большинство команд без ответа. С ответом: `status`, `stats`, `heap`, `help`, `evlog` (только USB), `save`, `reboot`, `factory`, `preset:N`, `test:*`, `tvol:N`.

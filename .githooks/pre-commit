@@ -38,7 +38,7 @@ path_owner() {
 	firmware/* | SECURITY.md | .github/workflows/ci-firmware.yml) echo "firmware" ;;
 	android-app/* | .github/workflows/ci-android.yml) echo "android" ;;
 	pc-client/* | .github/workflows/ci-pc-client.yml) echo "pc-client" ;;
-	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE) echo "shared" ;;
+	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE | NOTICE) echo "shared" ;;
 	.gitignore | .gitattributes | .editorconfig) echo "shared" ;;
 	docs/* | .githooks/*) echo "shared" ;;
 	.github/workflows/ci-hygiene.yml | .github/workflows/release.yml) echo "shared" ;;

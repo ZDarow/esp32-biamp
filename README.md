@@ -73,6 +73,7 @@ esp32-biamp/
 │   └── docs/DOCUMENTATION.md    # Техническая документация приложения
 ├── .github/workflows/           # CI
 ├── LICENSE                      # GPL-3.0
+├── NOTICE                       # авторские права и лицензии составных частей
 └── CONTRIBUTING.md
 ```
 
@@ -339,14 +340,14 @@ HeapMin: 15860
 
 ## Лицензия
 
-GPL-3.0-or-later. См. [LICENSE](LICENSE).
+GPL-3.0-or-later. См. [LICENSE](LICENSE) и [NOTICE](NOTICE).
 
 Прошивка использует сторонние библиотеки под собственными лицензиями:
 
 | Библиотека | Источник | Лицензия |
 |---|---|---|
 | [arduino-audio-tools](https://github.com/pschatzmann/arduino-audio-tools) | GitHub, не в реестре Arduino | GPL-3.0 |
-| [ESP32-A2DP](https://github.com/pschatzmann/ESP32-A2DP) | GitHub, не в реестре Arduino | GPL-3.0 |
+| [ESP32-A2DP](https://github.com/pschatzmann/ESP32-A2DP) | GitHub, не в реестре Arduino | Apache-2.0 |
 | [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) | реестр Arduino | BSD-3-Clause |
 | [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) | реестр Arduino | BSD-3-Clause |
 | Arduino ESP32 core (`BluetoothSerial`, `Preferences`, `Wire`) | реестр Arduino | LGPL-2.1 |
