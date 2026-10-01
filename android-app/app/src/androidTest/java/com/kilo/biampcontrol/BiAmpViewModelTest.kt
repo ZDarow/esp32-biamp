@@ -79,7 +79,7 @@ class BiAmpViewModelTest {
         "XO: Butter OFF",
         "TLF=3.00dB THF=0.00dB",
         "EQ: L=2.00 M=0.00 H=1.00",
-        "INV: 0100",
+        "SWP: 1",
         "BT: ON | SPP: ON",
         "Src: 48.0 kHz",
         "Test: 2 TVol=9%",
@@ -117,11 +117,11 @@ class BiAmpViewModelTest {
         assertEquals(-1.5f, ds.bal, 1e-4f)
         assertEquals(350f, ds.fc, 0.1f)
         assertEquals(3f, ds.tlf, 1e-4f)
-        assertEquals(listOf(false, true, false, false), ds.inv)
         assertEquals("48.0", ds.srcKhz)
         assertEquals(2, ds.testMode)
         assertEquals(9, ds.testVol)
         assertFalse("XO: Butter OFF — кроссовер выключен", ds.xoOn)
+        assertTrue("SWP: 1 — перестановка Л и П включена", ds.lrSwap)
         assertFalse("полный блок разобран — синхронизация снята", vm.isSyncing.value)
     }
 

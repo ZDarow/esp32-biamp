@@ -17,14 +17,14 @@ import org.junit.Test
 
 class StatusParserTest {
 
-    /** Блок status прошивки v30, как он приходит с усилителя. */
+    /** Блок status прошивки v35, как он приходит с усилителя. */
     private val blockV30 = listOf(
         "V0=11% V1=11% bal=0.00",
         "Fc=350Hz hp=45Hz sub=ON",
         "XO: Butter OFF",
         "TLF=0.00dB THF=0.00dB",
         "EQ: L=2.00 M=0.00 H=1.00",
-        "INV: 0000",
+        "SWP: 0",
         "BT: ON | SPP: ON",
         "Src: 44.1 kHz",
         "Test: 0 TVol=6%",
@@ -45,7 +45,7 @@ class StatusParserTest {
         assertEquals(2f, s.eql, 1e-4f)
         assertEquals(0f, s.eqm, 1e-4f)
         assertEquals(1f, s.eqh, 1e-4f)
-        assertEquals(listOf(false, false, false, false), s.inv)
+        assertFalse(s.lrSwap)
         assertTrue(s.btAudioOn)
         assertTrue(s.sppOn)
         assertEquals("44.1", s.srcKhz)
@@ -141,11 +141,22 @@ class StatusParserTest {
     }
 
     @Test
-    fun `канальные фильтры на инверсии читаются`() {
+    fun `перестановка Л и П читается`() {
         val s = StatusParser.parse(
-            blockV30.map { if (it.startsWith("INV:")) "INV: 1010" else it }
+            blockV30.map { if (it.startsWith("SWP:")) "SWP: 1" else it }
         )!!
-        assertEquals(listOf(true, false, true, false), s.inv)
+        assertTrue(s.lrSwap)
+    }
+
+    @Test
+    fun `старая строка INV больше не влияет на состояние`() {
+        // Прошивка v34 присылала "INV: 1010". Приложение v35 такой строки
+        // не знает и обязано оставить перестановку выключенной, а не
+        // истолковать её как swap.
+        val s = StatusParser.parse(
+            blockV30.map { if (it.startsWith("SWP:")) "INV: 1010" else it }
+        )!!
+        assertFalse(s.lrSwap)
     }
 
     /**

@@ -550,19 +550,9 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             )
         }
 
-        // Фаза: прошивка даёт только инверсию знака inv:C, 0 или 180°.
-        val inverted = ds.inv.getOrElse(band.chLeft) { false } ||
-            ds.inv.getOrElse(band.chRight) { false }
-        StepperRow(
-            label = stringResource(R.string.stepper_phase),
-            valueText = stringResource(
-                if (inverted) R.string.phase_180 else R.string.phase_0
-            ),
-            enabled = enabled,
-            onPrev = null,
-            onNext = null,
-            onReset = { band.channels.forEach { vm.toggleInv(it) } }
-        )
+        // Фазы у полосы больше нет: инверсию знака убрали из прошивки в v35.
+        // Настройку сдвига сторон делает перестановка Л/П в блоке DSP —
+        // она общая для полосы, а не отдельная настройка каждой.
 
         Text(
             stringResource(R.string.slope_note),

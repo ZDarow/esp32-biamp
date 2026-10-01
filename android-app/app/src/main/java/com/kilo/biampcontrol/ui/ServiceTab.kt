@@ -127,7 +127,7 @@ Text(stringResource(R.string.service_title), style = MaterialTheme.typography.ti
                 Text("XO: ${if (ds.xoType == 2) "LR4" else "Butter"}")
                 Text("TLF=${ds.tlf}dB THF=${ds.thf}dB")
                 Text("EQ: ${ds.eql}/${ds.eqm}/${ds.eqh}")
-                Text("INV: ${ds.inv.map { if (it) 1 else 0 }.joinToString("")}")
+                Text("SWP: ${if (ds.lrSwap) 1 else 0}")
                 Text("BT: ${if (ds.btAudioOn) "ON" else "OFF"} | SPP: ${if (ds.sppOn) "ON" else "OFF"}")
                 Text("Test: ${ds.testMode} TVol=${ds.testVol}%")
                 Text("Delay: ${ds.delays.joinToString("/")}")

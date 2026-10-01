@@ -36,7 +36,10 @@ data class DeviceState(
     val eql: Float = 0f,
     val eqm: Float = 0f,
     val eqh: Float = 0f,
-val inv: List<Boolean> = listOf(false, false, false, false),
+// Прошивка v35 вместо инверсии фазы присылает перестановку Л/П:
+    // "SWP: 1" — каналы выведены наоборот. Старые прошивки присылали
+    // "INV: 0100", и этой строки больше нет вовсе.
+    val lrSwap: Boolean = false,
     val btAudioOn: Boolean = false,
     val sppOn: Boolean = false,
     val testMode: Int = 0,
@@ -53,7 +56,7 @@ object StatusParser {
     private val reFc   = Regex("Fc=([\\d.]+)Hz\\s+hp=([\\d.]+)Hz\\s+sub=(ON|OFF)")
     private val reTrim = Regex("TLF=(-?[\\d.]+)dB\\s+THF=(-?[\\d.]+)dB")
     private val reEq   = Regex("EQ:\\s*L=(-?[\\d.]+)\\s+M=(-?[\\d.]+)\\s+H=(-?[\\d.]+)")
-    private val reInv  = Regex("INV:\\s+([01]{4})")
+    private val reSwp  = Regex("SWP:\\s+([01])")
     // ИСПРАВЛЕНО: парсит "BT: ON | SPP: ON" или "BT: ON"
     private val reBt   = Regex("BT:\\s+(ON|OFF)(?:\\s*\\|\\s*SPP:\\s+(ON|OFF))?")
     // "Test: 0 TVol=6%" — v29 добавил громкость тест-сигнала в ту же строку
@@ -120,8 +123,8 @@ object StatusParser {
                     eqh = m.groupValues[3].toFloatOrNull() ?: 0f
                 ); found = true
             }
-            reInv.find(l)?.let { m ->
-                s = s.copy(inv = m.groupValues[1].map { it == '1' }); found = true
+reSwp.find(l)?.let { m ->
+s = s.copy(lrSwap = m.groupValues[1] == "1"); found = true
             }
 reBt.find(l)?.let { m ->
                 // У прошивки без поддержки `status` по SPP в строке есть только

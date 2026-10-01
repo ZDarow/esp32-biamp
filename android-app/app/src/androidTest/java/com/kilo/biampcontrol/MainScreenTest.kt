@@ -38,16 +38,21 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.kilo.biampcontrol.bt.ConnState
@@ -78,7 +83,7 @@ class MainScreenTest {
         "XO: Butter ON",
         "TLF=3.00dB THF=0.00dB",
         "EQ: L=2.00 M=0.00 H=1.00",
-        "INV: 0100",
+        "SWP: 1",
         "BT: ON | SPP: ON",
         "Src: 48.0 kHz",
         "Test: 0 TVol=9%",
@@ -88,6 +93,16 @@ class MainScreenTest {
 
     /** Строка из ресурсов: язык устройства в тестах не задаём. */
     private fun str(id: Int): String = app.getString(id)
+
+    /**
+     * Единый значок подключения.
+     *
+     * Ищем по `conn_toggle_cd`, а не по тексту: у иконки внутри contentDescription
+     * пустой (иначе TalkBack прочёл бы имя дважды), поэтому единственная
+     * устойчивая подпись узла — та, что задана самому IconButton.
+     */
+    private fun connButton(): SemanticsNodeInteraction =
+        compose.onNodeWithContentDescription(str(R.string.conn_toggle_cd))
 
     @Before
     fun setUp() {
@@ -128,7 +143,10 @@ class MainScreenTest {
         compose.onNodeWithContentDescription(str(R.string.volume_both)).assertIsNotEnabled()
         compose.onNodeWithContentDescription(str(R.string.volume_left)).assertIsNotEnabled()
         compose.onNodeWithText(str(R.string.mute_left)).assertIsNotEnabled()
-        compose.onNodeWithText(str(R.string.action_connect)).assertIsDisplayed()
+        // Значок подключения — единственная кнопка состояния, и по её
+        // подписи мы находим её и без связи: надписи «Подкл.» больше нет.
+        connButton().assertIsDisplayed()
+        connButton().assert(hasStateDescription(str(R.string.conn_state_off)))
     }
 
     @Test
@@ -154,15 +172,20 @@ class MainScreenTest {
     }
 
     @Test
-    fun кнопкаОтключенияПоявляетсяТолькоПриСвязи() {
-        compose.onNodeWithText(str(R.string.action_connect)).assertIsDisplayed()
-        compose.onNodeWithText(str(R.string.action_disconnect)).doesNotExist()
+    fun кнопкаПодключенияСообщаетСостояниеИОтключаетПриСвязи() {
+        connButton().assert(hasStateDescription(str(R.string.conn_state_off)))
 
         runBlocking { client.deviceAnswers(*statusBlock.toTypedArray()) }
         compose.waitUntil(10_000) { vm.connState.value == ConnState.CONNECTED }
         compose.waitForIdle()
 
-        compose.onNodeWithText(str(R.string.action_disconnect)).assertIsDisplayed()
+        // Один и тот же узел остаётся на месте и меняет только состояние —
+        // ради этого кнопка и делалась единой.
+        connButton().assert(hasStateDescription(str(R.string.conn_state_on)))
+
+        connButton().performClick()
+        compose.waitForIdle()
+        assertEquals(ConnState.DISCONNECTED, vm.connState.value)
     }
 
     @Test
@@ -195,8 +218,47 @@ class MainScreenTest {
     }
 
     @Test
+    fun крутилкаFcОтправляетЗначениеПоОтпусканию() {
+        runBlocking { client.deviceAnswers(*statusBlock.toTypedArray()) }
+        connected()
+        compose.onNodeWithText(str(R.string.tab_dsp)).performClick()
+        compose.waitForIdle()
+
+        val dial = compose.onNodeWithContentDescription(str(R.string.xo_fc))
+        dial.performScrollTo().assertIsDisplayed()
+        client.clearSent()
+
+        // Тап по дуге у её начала (верх шкалы): значение уходит на усилитель
+        // одним шагом, без дожимовки — иначе по Bluetooth идёт поток `fc:`.
+        dial.performTouchInput { click(Offset(centerX.toFloat(), height * 0.12f)) }
+        compose.waitForIdle()
+
+        val fc = client.sent.filter { it.startsWith("fc:") }
+        assertEquals("Тап по ручке должен дать ровно одну команду fc", 1, fc.size)
+    }
+
+    @Test
+    fun крутилкаПоказываетТекущееЗначение() {
+        runBlocking { client.deviceAnswers(*statusBlock.toTypedArray()) }
+        connected()
+        compose.onNodeWithText(str(R.string.tab_dsp)).performClick()
+        compose.waitForIdle()
+
+        // 350 Гц из блока status: ручка обязана показывать то, что ответил
+        // усилитель, а не локальное значение, оставшееся от прошлой сессии.
+        val hz = "350" + str(R.string.suffix_hz).trim()
+        // Прокрутка и проверка состояния разнесены: performScrollTo() над узлом,
+        // найденным по связке двух признаков, не находит прокручиваемого
+        // предка — он ищет по цепочке scroll-семантики от самого узла.
+        compose.onNodeWithContentDescription(str(R.string.xo_fc))
+            .performScrollTo()
+            .assert(hasStateDescription(hz))
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun окноВыбораУстройстваОткрываетсяИЗакрывается() {
-        compose.onNodeWithText(str(R.string.action_connect)).performClick()
+        connButton().performClick()
         compose.waitForIdle()
 
         compose.onNodeWithText(str(R.string.device_picker_title)).assertIsDisplayed()

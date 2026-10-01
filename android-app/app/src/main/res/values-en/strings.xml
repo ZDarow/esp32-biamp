@@ -14,6 +14,13 @@
     <string name="action_disconnect">Disconnect</string>
     <string name="action_connect">Connect</string>
 
+    <!-- Connection toggle: one button for both states -->
+    <string name="conn_toggle_cd">Amplifier connection</string>
+    <string name="conn_state_on">Connected, tap to disconnect</string>
+    <string name="conn_state_connecting">Connecting…</string>
+    <string name="conn_state_reconnecting">Reconnecting…</string>
+    <string name="conn_state_off">Disconnected, tap to connect</string>
+
     <!-- Device picker -->
     <string name="device_picker_title">Select device</string>
     <string name="device_picker_empty">No paired devices.\nPair the phone with ESP32 BiAmp Speaker in Bluetooth settings first.</string>
@@ -76,6 +83,8 @@
     <string name="xo_state_on">LF/HF split is active</string>
     <string name="xo_state_off">Off: bands get one common path</string>
     <string name="suffix_hz"> Hz</string>
+    <string name="xo_fc">Crossover frequency Fc</string>
+    <string name="subsonic_knob">Subsonic HPF cutoff</string>
     <string name="subsonic_hpf">Subsonic HPF</string>
     <string name="xo_type">Crossover type</string>
 
@@ -87,8 +96,9 @@
     <string name="eq_reset_cd">%1$s, reset to 0 dB</string>
     <string name="band_title">Bands — per-band trim</string>
     <string name="band_caption">Extra filters and level for a single band on top of the global crossover. Applied after it, so they can only narrow the band range, never widen it beyond Fc.</string>
-    <string name="phase_inversion">Phase inversion</string>
-    <string name="reset_inversion">Reset inversions</string>
+    <string name="lr_swap">L/R swap</string>
+    <string name="lr_swap_caption">Swaps the amplifier outputs when the left channel comes out of the right speaker. No rewiring needed.</string>
+    <string name="lr_switch">Swap channels</string>
 
     <!-- Channel names: order matches ch_hp/ch_lp indices -->
     <string name="channel_lf">LF-L</string>
@@ -102,9 +112,6 @@
     <string name="stepper_hp">HPF FREQUENCY</string>
     <string name="stepper_lp">LPF FREQUENCY</string>
     <string name="stepper_level">LEVEL</string>
-    <string name="stepper_phase">PHASE</string>
-    <string name="phase_180">180 Degrees</string>
-    <string name="phase_0">0 Degrees</string>
     <string name="graph_cd">Band response %1$s: HPF %2$s, LPF %3$s, level %4$s dB, slope 12 dB per octave</string>
     <string name="mismatch_notice">L and R differ (L: %1$d/%2$d Hz, R: %3$d/%4$d Hz). The stepper writes both channels.</string>
     <string name="slope_note">Slope 12 dB/oct (Q=0.71) is fixed by the firmware</string>

@@ -74,8 +74,14 @@ fun DspTab(vm: BiAmpViewModel) {
         // (их нечем менять, пока секции считаются как bypass), поэтому
         // элементы остаются видимыми — просто недоступными.
         val xoEnabled = enabled && ds.xoOn
-        LabeledSlider("Fc", ds.fc, 200f..1000f, xoEnabled,
-            stringResource(R.string.suffix_hz), 15) { vm.setFc(it.roundToInt()) }
+        DialRow(
+            label = stringResource(R.string.xo_fc),
+            value = ds.fc,
+            range = 200f..1000f,
+            steps = 15,
+            enabled = xoEnabled
+        ) { vm.setFc(it.roundToInt()) }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -85,8 +91,13 @@ fun DspTab(vm: BiAmpViewModel) {
             Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
         }
         if (ds.subOn) {
-            LabeledSlider("HPF", ds.hp, 20f..80f, enabled,
-                stringResource(R.string.suffix_hz), 11) { vm.setHp(it.roundToInt()) }
+            DialRow(
+                label = stringResource(R.string.subsonic_knob),
+                value = ds.hp,
+                range = 20f..80f,
+                steps = 11,
+                enabled = enabled
+            ) { vm.setHp(it.roundToInt()) }
         }
         Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -115,23 +126,66 @@ fun DspTab(vm: BiAmpViewModel) {
 
         HorizontalDivider()
 
-        // ── 5. Инверсия фазы ─────────────────────────────────────
-        Text(stringResource(R.string.phase_inversion), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CHANNEL_NAME_RES.forEachIndexed { ch, res ->
-                FilterChip(
-                    selected = ds.inv.getOrElse(ch) { false },
-                    onClick = { vm.toggleInv(ch) },
-                    label = { Text(stringResource(res)) },
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+        // ── 5. Перестановка выходов Л/П ─────────────────────────────
+        Text(stringResource(R.string.lr_swap), style = MaterialTheme.typography.titleMedium)
+        Caption(stringResource(R.string.lr_swap_caption))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                stringResource(R.string.lr_switch),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = ds.lrSwap,
+                onCheckedChange = { vm.setLrSwap(it) },
+                enabled = enabled
+            )
         }
-        OutlinedButton(onClick = { vm.invOff() }, enabled = enabled,
-                       modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.reset_inversion)) }
 
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Ручка с подписью и текущим значением.
+ *
+ * Подпись и число стоят под крутилкой, а не рядом: так взгляд идёт сверху
+ * вниз по тому же порядку, в каком настройки перечислены в блоке, и большой
+ * блок не разрастается по ширине.
+ */
+@Composable
+private fun DialRow(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    enabled: Boolean,
+    onFinished: (Float) -> Unit
+) {
+    val stateText = sliderStateText(value, steps, " Гц")
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Dial(
+            value = value,
+            valueRange = range,
+            onValueChangeFinished = onFinished,
+            enabled = enabled,
+            steps = steps,
+            label = label,
+            stateText = stateText
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            stateText,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 

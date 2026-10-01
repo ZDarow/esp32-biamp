@@ -207,8 +207,6 @@ class BiAmpViewModel internal constructor(
     val eqPrefixes = listOf("eql", "eqm", "eqh")
     fun setEq(band: Int, v: Int, force: Boolean = false) =
         sender.send("${eqPrefixes[band]}:$v", force)
-    fun toggleInv(ch: Int) = sender.send("inv:$ch", true)
-    fun invOff() = sender.send("inv:off", true)
     fun preset(p: Int) = sender.send("preset:$p", true)
 
     // ── DSP v18: кроссовер, поканальные фильтры ───────────────────
@@ -219,6 +217,9 @@ class BiAmpViewModel internal constructor(
     fun setXoOn(on: Boolean) = sender.send(if (on) "xo:1" else "xo:0", true)
     fun setChHp(ch: Int, freq: Int) = sender.send("chhp:$ch:$freq", false)
     fun setChLp(ch: Int, freq: Int) = sender.send("chlp:$ch:$freq", false)
+
+    // ── Прошивка v35: перестановка выходов Л/П вместо инверсии фазы ──
+    fun setLrSwap(on: Boolean) = sender.send("swap:${if (on) 1 else 0}", true)
 
     // ── Транспорт / тесты / сервис ──────────────────────────────
     fun transport(k: String) = sender.send(k, true)      // play/pause/next/prev
