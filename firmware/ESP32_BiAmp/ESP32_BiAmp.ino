@@ -83,12 +83,18 @@
 #include <ctype.h>
 #include <atomic>
 
+// Выводы I²S разведены по двум портам: каждому усилилю свой порт со своими
+// тремя выводами. Общие пины у портов быть не могут — иначе один порт
+// перезапишет выводы другого при инициализации и оба зазвучат неверно.
+// Z1 — левый усилитель: BCK 4, LCK 15, DIN 2.
+// Z2 — правый усилитель: BCK 25, LCK 27, DIN 26. Порядок BCK/DIN здесь
+// обратный относительно Z1 и взят с реальной разводки платы.
 #define Z1_BCK 4
 #define Z1_LCK 15
 #define Z1_DIN 2
-#define Z2_BCK 26
-#define Z2_LCK 25
-#define Z2_DIN 27
+#define Z2_BCK 25
+#define Z2_LCK 27
+#define Z2_DIN 26
 #define OLED_SDA 21
 #define OLED_SCL 22
 #define OLED_ADDR 0x3C
