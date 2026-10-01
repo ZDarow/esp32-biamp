@@ -18,6 +18,34 @@ val signKeyPass = providers.gradleProperty("biampKeyPassword").orNull
 val hasSigning = listOf(signStoreFile, signStorePass, signKeyAlias, signKeyPass)
     .all { !it.isNullOrBlank() }
 
+// Идентификаторы проверок пакета androidx.compose.runtime.lint.
+//
+// Все они разбирают тело композабла, а детекторы собраны против Kotlin
+// Analysis API K1, тогда как проект собирается на K2 (Kotlin 2.0.21).
+// На этой связке они падают с IncompatibleClassChangeError, и падение
+// целиком роняет lintAnalyzeDebug. Список взят не «на глаз», а вытащен
+// из lint.jar compose runtime 1.9.1 (по одному Detector-классу на проверку).
+val COMPOSE_RUNTIME_LINT_IDS = setOf(
+    "AutoboxingStateCreation",
+    "AutoboxingStateValueProperty",
+    "ComposableLambdaParameterNaming",
+    "ComposableLambdaParameterPosition",
+    "ComposableNaming",
+    "CompositionLocalNaming",
+    "CoroutineCreationDuringComposition",
+    "FlowOperatorInvokedInComposition",
+    "FrequentlyChangedStateReadInComposition",
+    "MutableCollectionMutableState",
+    "OpaqueUnitKey",
+    "ProduceStateDoesNotAssignValue",
+    "RememberInComposition",
+    "RememberReturnType",
+    "StateFlowValueCalledInComposition",
+    "UnrememberedMutableState",
+    "UnrememberedState",
+    "UnrememberedStateCreation"
+)
+
 android {
     namespace = "com.kilo.biampcontrol"
     compileSdk = 35
@@ -55,6 +83,28 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+
+    lint {
+        // Детекторы androidx.lifecycle и androidx.compose слинкованы против
+        // интерфейсов Kotlin Analysis API K1, а проект собирается на K2
+        // (Kotlin 2.0.21). На этой связке они падают с IncompatibleClassChangeError
+        // («Found class KaCallableMemberCall, but interface was expected»),
+        // и падение целиком роняет lintAnalyzeDebug и lintVitalAnalyzeRelease.
+        // Воспроизводится и на чистом HEAD без локальных правок, то есть это
+        // баг детекторов и версии lint (31.7.3 в составе AGP 8.7.3),
+        // а не дефект кода. Отключаем ровно эти проверки — остальной
+        // статический анализ продолжает работать.
+        disable += "NullSafeMutableLiveData"
+        disable += "FrequentlyChangingValue"
+
+        // Тот же класс детекторов из androidx.compose.runtime.lint: они
+        // разбирают тело композабла и падают на K2 по очереди, один за другим.
+        // Первый упавший — RememberInCompositionDetector
+        // («Found class KaSimpleVariableAccessCall, but interface was expected»).
+        // Список закрывает весь пакет compose.runtime.lint, иначе после каждого
+        // отключения падал бы следующий детектор по цепочке.
+        disable += COMPOSE_RUNTIME_LINT_IDS
+    }
 }
 
 dependencies {
@@ -69,4 +119,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Юнит-тесты для чистой логики: парсера status (bt/Protocol.kt) и DSP-математики
+    // графика (ui/FilterGraph.kt). Обе проверяются без устройства и без Android-рантайма.
+    testImplementation("junit:junit:4.13.2")
 }

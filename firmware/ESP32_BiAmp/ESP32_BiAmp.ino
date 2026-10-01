@@ -1,7 +1,7 @@
 /**
  * @file ESP32_BiAmp.ino
  * @brief Би-амп ESP32: приём A2DP-аудио и вывод на два I2S-порта,
- *        управление по Bluetooth SPP. Версия 29.
+ *        управление по Bluetooth SPP. Версия 31.
  *
  * Описание архитектуры, всех команд и диагностики — в firmware/DOCUMENTATION.md.
  *
@@ -22,6 +22,19 @@
  *             примерно на 3580 байт — источник треска в динамиках при
  *             нулевых RingDrops и Underrun. Самотест проверяет содержимое
  *             кадров, а не только объём.
+ *        v30: общий кроссовер выключается целиком командой xo:0 — секции
+ *             1..4 уходят в обход, сабсоник и полосные фильтры остаются.
+ *             Значения fc и xotype при этом сохраняются. Блоб NVS стал
+ *             версии 22: xoon дописан последним, поэтому блоб v21
+ *             принимается целиком и мигрирует без потери настроек.
+ *        v31: на старте потока обнуляются состояния biquad'ов, линии задержки
+ *             и рампы громкости (событие t=7). После паузы источника
+ *             фильтры хранили отсчёты двухминутной давности, и первый блок
+ *             выходил со ступенькой — щелчком. Счётчик Starve теперь меряет
+ *             разрывы только внутри играющего потока: пауза источника
+ *             (заблокированный экран останавливает A2DP, но is_playing
+ *             остаётся true) раньше попадала в него целиком и давала
+ *             161 с «недокорма» при нулевых Underrun и RingDrops.
  *
  * @author Kilo
  * @license GNU General Public License v3.0 or later
@@ -97,6 +110,10 @@ bool  sub_on = true;
 float tlf_db = 0.0f, thf_db = -1.0f, eq_db[3] = {0, 0, 0};
 float bal = 0.0f;
 uint8_t xo_type = 1;
+// Выключатель кроссовера: при false секции 1..4 (ФНЧ/ФВЧ на fc) считаются
+// как bypass. Сабсоник (секция 0) и полосные фильтры при этом остаются
+// включены — выключается именно разделение на НЧ/ВЧ-ветку.
+bool  xo_on = true;
 bool  inv_ch[4] = {false, false, false, false};
 float ch_hp[4] = {0, 0, 0, 0};
 float ch_lp[4] = {0, 0, 0, 0};
@@ -117,6 +134,8 @@ std::atomic<float>   test_freq{440.0f};
 std::atomic<float>   test_vol{0.06f};
 
 std::atomic<uint32_t> starve_cnt{0}, starve_max_ms{0};
+// Ставится колбэком A2DP на старте потока, снимается задачей вывода.
+std::atomic<bool> dsp_reset_pending{false};
 std::atomic<uint32_t> dsp_max_us{0}, wr_max_us{0};
 std::atomic<uint32_t> loop_max_ms{0}, nvs_max_ms{0};
 std::atomic<uint32_t> und_z[2] = {{0}, {0}};
@@ -161,6 +180,22 @@ struct EvLog { uint32_t ms; uint8_t type; uint16_t val; };
 static EvLog evbuf[16];
 static uint8_t ev_idx = 0;
 static portMUX_TYPE ev_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// Блок сохранённых параметров. Объявлен здесь, а не в разделе NVS:
+// arduino-cli вставляет автопрототипы функций после этого блока глобальных
+// объявлений, и функция с параметром PBlob иначе не соберётся — тип ещё
+// не объявлен в момент генерации прототипа.
+struct PBlob {
+  uint32_t version;
+  float v0, v1, fc, hp, tlf, thf, eq0, eq1, eq2, bal, tvol;
+  float chh[4], chl[4];
+  uint16_t dly[4];
+  // xoon добавлен последним: так поля v21 остаются на прежних смещениях,
+  // и старый блоб можно принять целиком, а не сбрасывать настройки.
+  uint8_t m0, m1, sub, xot, invm, xoon;
+} __attribute__((packed));
+
+constexpr uint32_t PBLOB_VERSION = 22;
 
 // Запись и чтение журнала под мьютексом: запись записи должна быть атомарной.
 void logEvent(uint8_t type, uint16_t val) {
@@ -230,11 +265,13 @@ void calcSectionTo(float out_cb[][3], float out_ca[][2],
 void calcAllFilters(AudioParams &p) {
   memset(p.cb, 0, sizeof(p.cb));
   memset(p.ca, 0, sizeof(p.ca));
+  // Секции 0..4: сабсоник и кроссовер. При xo_on == false кроссоверные
+  // секции становятся bypass, а сабсоник остаётся — он не часть кроссовера.
   calcSectionTo(p.cb, p.ca, 0, sub_on ? 1 : 5, sub_hz, 0.7071f, 0);
-  calcSectionTo(p.cb, p.ca, 1, 0, fc_hz, 0.7071f, 0);
-  calcSectionTo(p.cb, p.ca, 2, (xo_type == 2) ? 0 : 5, fc_hz, 0.7071f, 0);
-  calcSectionTo(p.cb, p.ca, 3, 1, fc_hz, 0.7071f, 0);
-  calcSectionTo(p.cb, p.ca, 4, (xo_type == 2) ? 1 : 5, fc_hz, 0.7071f, 0);
+  calcSectionTo(p.cb, p.ca, 1, xo_on ? 0 : 5, fc_hz, 0.7071f, 0);
+  calcSectionTo(p.cb, p.ca, 2, (xo_on && xo_type == 2) ? 0 : 5, fc_hz, 0.7071f, 0);
+  calcSectionTo(p.cb, p.ca, 3, xo_on ? 1 : 5, fc_hz, 0.7071f, 0);
+  calcSectionTo(p.cb, p.ca, 4, (xo_on && xo_type == 2) ? 1 : 5, fc_hz, 0.7071f, 0);
   calcSectionTo(p.cb, p.ca, 5, fabsf(eq_db[0]) < 0.05f ? 5 : 3, 120, 0.7071f, eq_db[0]);
   calcSectionTo(p.cb, p.ca, 6, fabsf(eq_db[1]) < 0.05f ? 5 : 2, 1000, 1, eq_db[1]);
   calcSectionTo(p.cb, p.ca, 7, fabsf(eq_db[2]) < 0.05f ? 5 : 4, 6000, 0.7071f, eq_db[2]);
@@ -599,10 +636,33 @@ static void setI2SWriteTimeoutMs(TickType_t ms) {
 #endif
 }
 
+// Сброс состояния DSP при старте потока. Вызывается только из audioTask,
+// поэтому гонки с processBlock нет. Кольцо здесь не трогаем: его сбрасывает
+// ring_flush, выставленный тем же колбэком.
+void resetDspState() {
+  memset(st1, 0, sizeof(st1));
+  memset(st2, 0, sizeof(st2));
+  memset(chst, 0, sizeof(chst));
+  for (uint8_t c = 0; c < 4; c++) {
+    memset(delay_buf[c], 0, sizeof(delay_buf[c]));
+    delay_idx[c] = 0;
+  }
+  // Рампы громкости тоже к нулю: иначе на первом кадре усиление прыгнет
+  // от значения, набранного до паузы.
+  for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
+  logEvent(7, 0);
+}
+
 void audioTask(void *) {
   setI2SWriteTimeoutMs(pdMS_TO_TICKS(I2S_WRITE_TIMEOUT_MS));
   for (;;) {
     if (ring_flush.exchange(false)) ringFlush();
+    // Старт потока: обнуляем состояние фильтров и рампы. После паузы
+    // (заблокированный экран телефона, другой трек) biquad'ы хранят отсчёты
+    // двухминутной давности, и первый же блок выходит со ступенькой — щелчком.
+    // Сброс делается здесь, в задаче вывода: из колбэка A2DP это была бы гонка
+    // с processBlock по тем же переменным.
+    if (dsp_reset_pending.exchange(false, std::memory_order_acquire)) resetDspState();
     refreshParams();
     int n;
     bool from_ring = false;
@@ -619,16 +679,26 @@ void write_data_stream(const uint8_t *data, uint32_t length) {
   if (test_mode.load(std::memory_order_relaxed) != 0) return;
 
   uint32_t cb_now = millis();
+  // last_cb_ms живёт только внутри играющего потока. Раньше он обновлялся
+  // всегда, и пауза источника (заблокированный экран телефона останавливает
+  // A2DP, но is_playing остаётся true) попадала в Starve целиком: счётчик
+  // показывал 161 с «недокорма» при нулевых Underrun и RingDrops.
+  // Теперь длительность паузы в счётчик не попадает, а разрывы внутри
+  // одного потока — попадают.
   static uint32_t last_cb_ms = 0;
-  if (last_cb_ms && is_playing.load()) {
-    uint32_t gap = cb_now - last_cb_ms;
-    if (gap > 40) {
-      starve_cnt.fetch_add(1, std::memory_order_relaxed);
-      if (gap > starve_max_ms.load(std::memory_order_relaxed)) starve_max_ms.store(gap, std::memory_order_relaxed);
-      logEvent(1, (uint16_t)min(gap, 65000ul));
+  if (is_playing.load()) {
+    if (last_cb_ms) {
+      uint32_t gap = cb_now - last_cb_ms;
+      if (gap > 40) {
+        starve_cnt.fetch_add(1, std::memory_order_relaxed);
+        if (gap > starve_max_ms.load(std::memory_order_relaxed)) starve_max_ms.store(gap, std::memory_order_relaxed);
+        logEvent(1, (uint16_t)min(gap, 65000ul));
+      }
     }
+    last_cb_ms = cb_now;
+  } else {
+    last_cb_ms = 0;
   }
-  last_cb_ms = cb_now;
 
   const int16_t *in = (const int16_t *)data;
   int n = (int)(length / 4);
@@ -667,7 +737,21 @@ void bt_state_cb(esp_a2d_connection_state_t state, void *) {
   ui_dirty.store(true);
 }
 void audio_state_cb(esp_a2d_audio_state_t state, void *) {
-  is_playing.store(state == ESP_A2D_AUDIO_STATE_STARTED);
+  // Сброс состояния фильтров только на переходе «не играем → играем».
+  // is_playing ставим выше; счётчик перехода живёт здесь, потому что
+  // write_data_stream — другой поток и общего состояния с ним не имеет.
+  static bool was_playing = false;
+  bool now = (state == ESP_A2D_AUDIO_STATE_STARTED);
+  is_playing.store(now);
+  if (now && !was_playing) {
+    // Событие приходит до первого аудиоблока нового потока, но гарантии по
+    // времени нет, поэтому просим задачу вывода сбросить себя. Иначе после
+    // паузы biquad'ы хранят отсчёты двухминутной давности, и первый блок
+    // выходит со ступенькой — щелчком на старте.
+    dsp_reset_pending.store(true, std::memory_order_release);
+    ring_flush.store(true);
+  }
+  was_playing = now;
   ui_dirty.store(true);
 }
 
@@ -694,22 +778,15 @@ void say(const __FlashStringHelper *s) {
 }
 
 // ===================== NVS =============================================
-struct PBlob {
-  uint32_t version;
-  float v0, v1, fc, hp, tlf, thf, eq0, eq1, eq2, bal, tvol;
-  float chh[4], chl[4];
-  uint16_t dly[4];
-  uint8_t m0, m1, sub, xot, invm;
-} __attribute__((packed));
-
 void saveAllParams() {
   uint32_t t0 = millis();
   PBlob b;
   memset(&b, 0, sizeof(b));
-  b.version = 21;
+  b.version = PBLOB_VERSION;
   b.v0 = vol_z[0]; b.v1 = vol_z[1];
   b.m0 = muted_z[0]; b.m1 = muted_z[1];
   b.fc = fc_hz; b.hp = sub_hz; b.sub = sub_on ? 1 : 0; b.xot = xo_type;
+  b.xoon = xo_on ? 1 : 0;
   b.tlf = tlf_db; b.thf = thf_db;
   b.eq0 = eq_db[0]; b.eq1 = eq_db[1]; b.eq2 = eq_db[2];
   b.bal = bal; b.tvol = test_vol.load();
@@ -720,6 +797,21 @@ void saveAllParams() {
   if (dt > nvs_max_ms.load(std::memory_order_relaxed)) nvs_max_ms.store(dt, std::memory_order_relaxed);
   if (dt > 50) logEvent(3, (uint16_t)dt);
   if (!ok) Serial.println(F("NVS: save error"));
+}
+
+// Перенос всех полей блоба в живые параметры, кроме xoon: его вызывающий
+// разбирает сам, потому что в блоке v21 этого поля ещё не было.
+void applyBlob(const PBlob &b) {
+  vol_z[0] = b.v0; vol_z[1] = b.v1;
+  muted_z[0] = b.m0; muted_z[1] = b.m1;
+  fc_hz = b.fc; sub_hz = b.hp; sub_on = (b.sub != 0); xo_type = b.xot;
+  tlf_db = b.tlf; thf_db = b.thf;
+  eq_db[0] = b.eq0; eq_db[1] = b.eq1; eq_db[2] = b.eq2;
+  bal = b.bal; test_vol.store(b.tvol);
+  for (uint8_t c = 0; c < 4; c++) {
+    ch_hp[c] = b.chh[c]; ch_lp[c] = b.chl[c]; ch_delay[c] = b.dly[c];
+    inv_ch[c] = (b.invm >> c) & 1;
+  }
 }
 
 void sanitizeParams() {
@@ -839,6 +931,9 @@ void dispatchCommand(const char *cmd) {
   else if (cmdIs(cmd, "xotype:")) {
     if (safeCmdVal(cmd, v, 1, 2)) { xo_type = (uint8_t)v; TOUCH(); }
   }
+  else if (cmdIs(cmd, "xo:")) {
+    if (safeCmdVal(cmd, v, 0, 1)) { xo_on = ((int)v == 1); TOUCH(); }
+  }
   else if (cmdIs(cmd, "inv:")) {
     bool changed = false;
     if (cmdArgIs(cmd, "off")) {
@@ -909,7 +1004,7 @@ void dispatchCommand(const char *cmd) {
   else if (strcmp(cmd, "status") == 0) {
     say("V0=" + String((int)(vol_z[0]*100)) + "% V1=" + String((int)(vol_z[1]*100)) + "% bal=" + String(bal));
     say("Fc=" + String((int)fc_hz) + "Hz hp=" + String((int)sub_hz) + "Hz sub=" + String(sub_on ? "ON" : "OFF"));
-    say("XO: " + String(xo_type == 2 ? "LR4" : "Butter"));
+    say("XO: " + String(xo_type == 2 ? "LR4" : "Butter") + (xo_on ? " ON" : " OFF"));
     say("TLF=" + String(tlf_db) + "dB THF=" + String(thf_db) + "dB");
     say("EQ: L=" + String(eq_db[0]) + " M=" + String(eq_db[1]) + " H=" + String(eq_db[2]));
     String inv = String(inv_ch[0]?1:0) + String(inv_ch[1]?1:0) + String(inv_ch[2]?1:0) + String(inv_ch[3]?1:0);
@@ -947,7 +1042,7 @@ void dispatchCommand(const char *cmd) {
   else if (strcmp(cmd, "factory") == 0){ prefs.clear(); say(F("Factory reset")); delay(500); ESP.restart(); }
   else if (strcmp(cmd, "help") == 0) {
     say(F("vol:N v0:N v1:N bal:N mute:N"));
-    say(F("fc:N hp:N sub:0/1 xotype:1-2 tlf:N thf:N"));
+    say(F("fc:N hp:N sub:0/1 xo:0/1 xotype:1-2 tlf:N thf:N"));
     say(F("eql:N eqm:N eqh:N preset:0-3"));
     say(F("inv:0-3 inv:off"));
     say(F("chhp:C:F chlp:C:F delayC:N"));
@@ -992,23 +1087,29 @@ void updateGeneralDisplay() {
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v29 (ring wrap fixed)"));
+  Serial.println(F("\n\nboot: bi-amp v31 (dsp reset on stream start)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 
   if (!prefs.begin(NVS_NS, false)) Serial.println(F("NVS: open error"));
   PBlob b;
-  if (prefs.getBytes("blob", &b, sizeof(b)) == sizeof(b) && b.version == 21) {
-    vol_z[0] = b.v0; vol_z[1] = b.v1;
-    muted_z[0] = b.m0; muted_z[1] = b.m1;
-    fc_hz = b.fc; sub_hz = b.hp; sub_on = (b.sub != 0); xo_type = b.xot;
-    tlf_db = b.tlf; thf_db = b.thf;
-    eq_db[0] = b.eq0; eq_db[1] = b.eq1; eq_db[2] = b.eq2;
-    bal = b.bal; test_vol.store(b.tvol);
-    for (uint8_t c = 0; c < 4; c++) { ch_hp[c] = b.chh[c]; ch_lp[c] = b.chl[c]; ch_delay[c] = b.dly[c]; }
-    for (uint8_t c = 0; c < 4; c++) inv_ch[c] = (b.invm >> c) & 1;
+  size_t got = prefs.getBytes("blob", &b, sizeof(b));
+  if (got == sizeof(b) && b.version == PBLOB_VERSION) {
+    applyBlob(b);
+    xo_on = (b.xoon != 0);
     sanitizeParams();
-    Serial.println(F("NVS: blob loaded (v21)"));
+    Serial.println(F("NVS: blob loaded (v22)"));
+  } else if (got == sizeof(b) - 1 && b.version == 21) {
+    // Блоб v21 — та же упакованная структура без последнего байта xoon.
+    // Структура дописана в конец, поэтому прежние поля лежат на тех же
+    // смещениях: принимаем блоб на байт короче и переписываем уже в v22.
+    // Простое «не совпала версия → ветка legacy» обнулило бы у пользователя
+    // все настройки, потому что saveAllParams пишет только ключ blob.
+    applyBlob(b);
+    xo_on = true;
+    sanitizeParams();
+    saveAllParams();
+    Serial.println(F("NVS: blob migrated v21 -> v22"));
   } else {
     for (uint8_t c = 0; c < 2; c++) {
       char kv[4] = {'v', (char)('0'+c), 0, 0};
@@ -1017,6 +1118,7 @@ void setup() {
     }
     fc_hz = prefs.getFloat("fc", 400); sub_hz = prefs.getFloat("hp", 45);
     sub_on = prefs.getBool("sub", true);
+    xo_on = prefs.getBool("xoon", true);
     tlf_db = prefs.getFloat("tlf", 0); thf_db = prefs.getFloat("thf", -1);
     eq_db[0] = prefs.getFloat("eql", 0); eq_db[1] = prefs.getFloat("eqm", 0); eq_db[2] = prefs.getFloat("eqh", 0);
     bal = prefs.getFloat("bal", 0);
@@ -1033,7 +1135,7 @@ void setup() {
     }
     sanitizeParams();
     saveAllParams();
-    Serial.println(F("NVS: legacy migrated to v21"));
+    Serial.println(F("NVS: legacy migrated to v22"));
   }
   scheduleFilterUpdate();
 

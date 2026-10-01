@@ -32,13 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.bt.ConnState
-import java.util.Locale
 import kotlin.math.roundToInt
-
-/** Верхняя граница задержки канала: MAX_DELAY_SAMPLES в прошивке ESP32.
- *  DELAY_BUF_SIZE = 256, поэтому 220 сэмплов (4.99 мс при 44.1 кГц) — потолок
- *  с запасом 36 отсчётов на развёртку линии задержки. */
-const val MAX_DELAY_SAMPLES = 220
 
 @Composable
 fun DspTab(vm: BiAmpViewModel) {
@@ -55,9 +49,33 @@ fun DspTab(vm: BiAmpViewModel) {
     ) {
         Text("DSP", style = MaterialTheme.typography.titleLarge)
 
-        // ── 1. Кроссовер ─────────────────────────────────────────
-        Text("Кроссовер", style = MaterialTheme.typography.titleMedium)
-        LabeledSlider("Fc", ds.fc, 200f..1000f, enabled, " Гц", 15) { vm.setFc(it.roundToInt()) }
+        // ── 1. Кроссовер: общий срез НЧ/ВЧ-веток ─────────────────
+        Text("Кроссовер — общий срез", style = MaterialTheme.typography.titleMedium)
+        Caption(
+            "Делит весь тракт на НЧ- и ВЧ-ветку. Работает одинаково для всех " +
+                "динамиков и задаёт базовую границу, к которой затем добавляются " +
+                "фильтры отдельных полос."
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Кроссовер вкл.", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    if (ds.xoOn) "Разделение НЧ/ВЧ активно"
+                    else "Выключен: полосы получают общий тракт",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = ds.xoOn, onCheckedChange = { vm.setXoOn(it) }, enabled = enabled)
+        }
+        // Выключенный кроссовер оставляет значения Fc и типа в памяти
+        // (их нечем менять, пока секции считаются как bypass), поэтому
+        // элементы остаются видимыми — просто недоступными.
+        val xoEnabled = enabled && ds.xoOn
+        LabeledSlider("Fc", ds.fc, 200f..1000f, xoEnabled, " Гц", 15) { vm.setFc(it.roundToInt()) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -72,23 +90,16 @@ fun DspTab(vm: BiAmpViewModel) {
         Text("Тип кроссовера", style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
-                       label = { Text("Butterworth") }, enabled = enabled,
+                       label = { Text("Butterworth") }, enabled = xoEnabled,
                        modifier = Modifier.weight(1f))
             FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
-                       label = { Text("LR4") }, enabled = enabled,
+                       label = { Text("LR4") }, enabled = xoEnabled,
                        modifier = Modifier.weight(1f))
         }
 
         HorizontalDivider()
 
-        // ── 2. Тримы веток ───────────────────────────────────────
-        Text("Тримы веток", style = MaterialTheme.typography.titleMedium)
-        LabeledSlider("НЧ (LF)", ds.tlf, -6f..3f, enabled, " дБ") { vm.setTlf(it) }
-        LabeledSlider("ВЧ (HF)", ds.thf, -6f..3f, enabled, " дБ") { vm.setThf(it) }
-
-        HorizontalDivider()
-
-        // ── 3. Эквалайзер ────────────────────────────────────────
+        // ── 2. Эквалайзер ────────────────────────────────────────
         Text("Эквалайзер", style = MaterialTheme.typography.titleMedium)
         EqRow("Low 120Hz", ds.eql, enabled, { vm.setEq(0, 0) }) { vm.setEq(0, it.roundToInt()) }
         EqRow("Mid 1kHz",  ds.eqm, enabled, { vm.setEq(1, 0) }) { vm.setEq(1, it.roundToInt()) }
@@ -96,26 +107,21 @@ fun DspTab(vm: BiAmpViewModel) {
 
         HorizontalDivider()
 
-        // ── 4. Задержка каналов ──────────────────────────────────
-        Text("Задержка каналов", style = MaterialTheme.typography.titleMedium)
-        val dNames = listOf("НЧ-Л", "ВЧ-Л", "НЧ-П", "ВЧ-П")
-        dNames.forEachIndexed { ch, name ->
-            DelayRow(name, ds.delays.getOrElse(ch) { 0 }.toFloat(), enabled) {
-                vm.setDelay(ch, it.roundToInt())
-            }
-        }
+        // ── 3. Полосы СЧ/ВЧ: точка подстройки поверх кроссовера ──
+        Text("Полосы — подстройка полосы", style = MaterialTheme.typography.titleMedium)
+        Caption(
+            "Дополнительные фильтры и уровень одной полосы поверх общего " +
+                "кроссовера. Применяются после него, поэтому могут только сузить " +
+                "диапазон полосы, но не расширить его за Fc."
+        )
+        FilterGraph(vm, ds, enabled)
 
         HorizontalDivider()
 
-        // ── 5. Попканальные фильтры ──────────────────────────
-        ChannelFilters(vm, ds, enabled)
-
-        HorizontalDivider()
-
-        // ── 6. Инверсия фазы ─────────────────────────────────────
+        // ── 5. Инверсия фазы ─────────────────────────────────────
         Text("Инверсия фазы", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            dNames.forEachIndexed { ch, name ->
+            CHANNEL_NAMES.forEachIndexed { ch, name ->
                 FilterChip(
                     selected = ds.inv.getOrElse(ch) { false },
                     onClick = { vm.toggleInv(ch) },
@@ -130,6 +136,16 @@ fun DspTab(vm: BiAmpViewModel) {
 
         Spacer(Modifier.height(8.dp))
     }
+}
+
+/** Пояснение под заголовком блока: чем этот блок отличается от соседнего. */
+@Composable
+private fun Caption(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 // ── Полоса EQ: кнопка «0» в строке заголовка, слайдер отдельно ──
@@ -163,34 +179,6 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
             onValueChangeFinished = { onFinished(pos) },
             valueRange = -12f..12f, steps = 23, enabled = enabled,
             contentDescription = label,
-            stateDescriptionText = stateText,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-// ── Задержка: подпись «N сэмплов (X,X мс)» ──
-@Composable
-private fun DelayRow(label: String, value: Float, enabled: Boolean, onFinished: (Float) -> Unit) {
-    var pos by remember { mutableFloatStateOf(value) }
-    LaunchedEffect(value) { pos = value }
-    val stateText = "${pos.roundToInt()} сэмпл (${String.format(Locale.US, "%.1f", pos / 44.1f)} мс)"
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(stateText,
-             style = MaterialTheme.typography.bodyMedium,
-             color = MaterialTheme.colorScheme.primary)
-    }
-    // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
-    Row(Modifier.fillMaxWidth().height(28.dp)) {
-        CompactSlider(
-            value = pos, onValueChange = { pos = it },
-            onValueChangeFinished = { onFinished(pos) },
-            valueRange = 0f..MAX_DELAY_SAMPLES.toFloat(), steps = 0, enabled = enabled,
-            contentDescription = "Задержка, $label",
             stateDescriptionText = stateText,
             modifier = Modifier.fillMaxWidth()
         )

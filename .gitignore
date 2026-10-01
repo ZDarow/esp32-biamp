@@ -62,3 +62,7 @@ gh_err.txt
 *.keystore
 keystore.properties
 biamp-signing.properties
+
+# Скриншоты чужих приложений (Prology и т.п.) — материал для сравнения,
+# а не исходники проекта: в публичный репозиторий не коммитим.
+Screenshot_*.png

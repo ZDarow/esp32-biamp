@@ -33,6 +33,7 @@ import com.kilo.biampcontrol.bt.*
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,6 +43,7 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
 
     private val spp = SppManager(viewModelScope)
     private val sender = CommandSender(spp, viewModelScope)
+    private val prefs = DevicePrefs(app)
 
     val connState = spp.state
     val deviceState = MutableStateFlow(DeviceState())
@@ -103,8 +105,61 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun connect(dev: BluetoothDevice) = spp.connect(dev)
-    fun disconnect() = spp.disconnect()
+    fun connect(dev: BluetoothDevice) {
+        prefs.remember(dev)
+        spp.connect(dev)
+    }
+
+    /**
+     * Явное отключение по кнопке пользователя. Оно же выключает автоподключение:
+     * иначе при следующем старте приложение снова подключилось бы само и
+     * отключение выглядело бы неработающим. Включается обратно тумблером
+     * в окне выбора устройства.
+     */
+    fun disconnect() {
+        setAutoConnect(false)
+        spp.disconnect()
+    }
+
+    /** Запомнено ли устройство (для показа в окне выбора). */
+    val rememberedName: String? get() = prefs.lastName
+
+    /**
+     * Флаг автоподключения как Flow: окно выбора устройства перерисовывается
+     * при переключении тумблера, а не только при пересоздании диалога.
+     */
+    private val _autoConnect = MutableStateFlow(prefs.autoConnect)
+    val autoConnect: StateFlow<Boolean> = _autoConnect
+
+    fun setAutoConnect(on: Boolean) {
+        prefs.autoConnect = on
+        _autoConnect.value = on
+    }
+
+    /** Забыть устройство: адрес, имя и автоподключение. */
+    fun forgetDevice() {
+        prefs.forget()
+        _autoConnect.value = prefs.autoConnect
+    }
+
+    /**
+     * Автоподключение к запомненному устройству при старте приложения.
+     * Работает только если устройство по-прежнему сопряжено с телефоном;
+     * без BLUETOOTH_CONNECT bondedDevices бросает SecurityException — тогда
+     * просто ждём ручного выбора. Вызывать после [refreshDevices].
+     */
+    fun autoConnectIfSaved(context: Context) {
+        if (!prefs.autoConnect) return
+        if (spp.state.value != ConnState.DISCONNECTED) return
+        val address = prefs.lastAddress ?: return
+        val dev = try {
+            val bm = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            bm.adapter?.bondedDevices?.firstOrNull { it.address == address }
+        } catch (_: SecurityException) {
+            null
+        } ?: return
+        spp.connect(dev)
+    }
 
     // ── Команды (громкость/зоны) ────────────────────────────────
     fun setVolBoth(v: Int, force: Boolean = false) = sender.send("vol:$v", force)
@@ -139,9 +194,12 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     fun invOff() = sender.send("inv:off", true)
     fun preset(p: Int) = sender.send("preset:$p", true)
 
-    // ── DSP v18: кроссовер, задержки, поканальные фильтры ────────
+    // ── DSP v18: кроссовер, поканальные фильтры ───────────────────
     fun setXoType(type: Int) = sender.send("xotype:$type", true)
-    fun setDelay(ch: Int, samples: Int) = sender.send("delay$ch:$samples", false)
+    // Выключатель общего кроссовера. Работает только с прошивкой v30+:
+    // на старой команда xo: неизвестна и молча игнорируется, а статус
+    // не содержит хвоста " ON"/" OFF", поэтому xoOn остаётся true.
+    fun setXoOn(on: Boolean) = sender.send(if (on) "xo:1" else "xo:0", true)
     fun setChHp(ch: Int, freq: Int) = sender.send("chhp:$ch:$freq", false)
     fun setChLp(ch: Int, freq: Int) = sender.send("chlp:$ch:$freq", false)
 

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -113,7 +114,13 @@ fun MainScreen(vm: BiAmpViewModel) {
         TabItem("Сервис", Icons.Default.Build)
     )
 
-    LaunchedEffect(Unit) { vm.refreshDevices(ctx) }
+    // Устройство выбирают один раз: дальше приложение помнит его и
+    // подключается само. refreshDevices — чтобы список сопряжённых был
+    // актуален, autoConnectIfSaved — чтобы не ждать ручного нажатия.
+    LaunchedEffect(Unit) {
+        vm.refreshDevices(ctx)
+        vm.autoConnectIfSaved(ctx)
+    }
 
     Scaffold(
         topBar = {
@@ -180,6 +187,8 @@ fun MainScreen(vm: BiAmpViewModel) {
     }
 
     if (showDevicePicker) {
+        val autoOn by vm.autoConnect.collectAsState()
+        val remembered = vm.rememberedName
         AlertDialog(
             onDismissRequest = { showDevicePicker = false },
             title = { Text("Выберите устройство") },
@@ -197,6 +206,29 @@ fun MainScreen(vm: BiAmpViewModel) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(dev.name ?: dev.address)
+                        }
+                    }
+                    if (remembered != null) {
+                        HorizontalDivider()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Автоподключение", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    remembered,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = autoOn,
+                                onCheckedChange = { vm.setAutoConnect(it) }
+                            )
+                        }
+                        TextButton(onClick = { vm.forgetDevice() }) {
+                            Text("Забыть устройство")
                         }
                     }
                 }

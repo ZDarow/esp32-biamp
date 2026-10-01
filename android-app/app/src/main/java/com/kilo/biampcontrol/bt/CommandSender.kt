@@ -32,11 +32,21 @@ import kotlinx.coroutines.channels.Channel
  */
 class CommandSender(private val spp: SppManager, private val scope: CoroutineScope) {
 
+    /**
+     * Префиксы, по которым команда проходит через троттлинг.
+     *
+     * У поканальных параметров ключ включает номер канала: степпер полосы
+     * отправляет chhp:0:… и chhp:2:… одной пачкой, и при ключе «chhp:»
+     * вторая команда вытеснила бы первую — левый канал молча остался бы
+     * на старой частоте. Номер канала в префиксе сохраняет независимость
+     * каналов при общем ограничении частоты.
+     */
     private val throttlePrefixes = listOf(
         "vol:", "v0:", "v1:", "bal:", "fc:", "hp:",
         "tlf:", "thf:", "eql:", "eqm:", "eqh:",
         "delay0:", "delay1:", "delay2:", "delay3:",
-        "chhp:", "chlp:",
+        "chhp:0:", "chhp:1:", "chhp:2:", "chhp:3:",
+        "chlp:0:", "chlp:1:", "chlp:2:", "chlp:3:",
         "tf:"
     )
 
