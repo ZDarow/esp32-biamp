@@ -1,4 +1,4 @@
-# Прошивка скетча BT_esp на плату
+﻿# Прошивка скетча BT_esp на плату
 # Использование:
 #   pwsh -File .\tools\flash.ps1                # сборка + прошивка
 #   pwsh -File .\tools\flash.ps1 -Port COM14    # указать порт

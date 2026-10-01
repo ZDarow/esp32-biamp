@@ -161,6 +161,9 @@ pwsh -File .\firmware\tools\flash.ps1 -Port COM5
 pwsh -File .\firmware\tools\monitor.ps1 -Port COM5 -Commands "status" -Seconds 10
 ```
 
+`pwsh` — это PowerShell 7; подойдёт и встроенный Windows PowerShell 5.1
+(`powershell -File ...`), скрипты сохранены с BOM ради этого.
+
 <details>
 <summary>Сборка из командной строки arduino-cli напрямую</summary>
 

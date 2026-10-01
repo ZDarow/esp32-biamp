@@ -1,4 +1,4 @@
-# Компиляция скетча BT_esp
+﻿# Компиляция скетча BT_esp
 # Использование: pwsh -File .\tools\build.ps1
 
 . "$PSScriptRoot\common.ps1"

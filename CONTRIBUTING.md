@@ -44,7 +44,7 @@ git config core.hooksPath .githooks
 |---|---|
 | [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | свежая |
 | ESP32 core | `esp32:esp32` 3.x |
-| PowerShell | 7 (pwsh) |
+| PowerShell | 5.1 или новее (`powershell` или `pwsh`) |
 
 ```bash
 arduino-cli core update-index
