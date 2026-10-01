@@ -149,7 +149,12 @@ uint8_t xo_type = 1;
 // как bypass. Сабсоник (секция 0) и полосные фильтры при этом остаются
 // включены — выключается именно разделение на НЧ/ВЧ-ветку.
 bool  xo_on = true;
-bool  inv_ch[4] = {false, false, false, false};
+// Перестановка выходов Л/П: при true каналы 0,1 уходят в правый разъём,
+// а 2,3 — в левый. Нужна, если усилитель физически подключён наоборот:
+// менять провода не всегда возможно, а слышать левый канал в правом
+// динамике неправильно. Инверсия фазы для этого не годится — она
+// переворачивает сигнал, а меняет стороны света.
+bool  lr_swap = false;
 float ch_hp[4] = {0, 0, 0, 0};
 float ch_lp[4] = {0, 0, 0, 0};
 uint16_t ch_delay[4] = {0, 0, 0, 0};
@@ -197,7 +202,6 @@ struct AudioParams {
   float bl, br;
   float vol[2];
   bool  mute[2];
-  bool  inv[4];
   uint16_t dly[4];
 };
 
@@ -238,10 +242,13 @@ struct PBlob {
   uint16_t dly[4];
   // xoon добавлен последним: так поля v21 остаются на прежних смещениях,
   // и старый блоб можно принять целиком, а не сбрасывать настройки.
-  uint8_t m0, m1, sub, xot, invm, xoon;
+  // invm переименован в swp на том же месте: инверсия фазы убрана,
+  // вместо неё перестановка Л/П. Размер и смещения не изменились,
+  // поэтому старый блоб читается как есть — просто его invm игнорируется.
+  uint8_t m0, m1, sub, xot, swp, xoon;
 } __attribute__((packed));
 
-constexpr uint32_t PBLOB_VERSION = 22;
+constexpr uint32_t PBLOB_VERSION = 23;
 
 // Запись и чтение журнала под мьютексом: запись записи должна быть атомарной.
 void logEvent(uint8_t type, uint16_t val) {
@@ -346,7 +353,7 @@ void scheduleFilterUpdate() {
   tmp.br = 1.0f + bal * 0.03f;
   tmp.vol[0] = vol_z[0]; tmp.vol[1] = vol_z[1];
   tmp.mute[0] = muted_z[0]; tmp.mute[1] = muted_z[1];
-  for (uint8_t c = 0; c < 4; c++) { tmp.inv[c] = inv_ch[c]; tmp.dly[c] = ch_delay[c]; }
+  for (uint8_t c = 0; c < 4; c++) { tmp.dly[c] = ch_delay[c]; }
   portENTER_CRITICAL(&ctrl_mux);
   memcpy(&shadow_ap, &tmp, sizeof(tmp));
   ap_dirty.store(true, std::memory_order_release);
@@ -500,12 +507,18 @@ void processBlock(const int16_t *in, int n) {
     for (uint8_t c = 0; c < 4; c++) {
       float v = runCh(raw[c], c);
       v = applyDelay(v, c, ap.dly[c]);
-      if (ap.inv[c]) v = -v;
       if (!(mask & (1 << c))) v = 0.0f;
       out[c] = softClip(v * gain[c], c);
     }
-    bz1[f * 2] = (int16_t)(out[0] * 32767); bz1[f * 2 + 1] = (int16_t)(out[1] * 32767);
-    bz2[f * 2] = (int16_t)(out[2] * 32767); bz2[f * 2 + 1] = (int16_t)(out[3] * 32767);
+    // Перестановка Л/П делается на готовых отсчётах, а не на входе:
+    // так каналы меняются местами целиком, вместе со своей обработкой.
+    int16_t *o1; int16_t *o2;
+    if (lr_swap) { o1 = bz2 + f * 2; o2 = bz1 + f * 2; }
+    else         { o1 = bz1 + f * 2; o2 = bz2 + f * 2; }
+    o1[0] = (int16_t)(out[lr_swap ? 2 : 0] * 32767);
+    o1[1] = (int16_t)(out[lr_swap ? 3 : 1] * 32767);
+    o2[0] = (int16_t)(out[lr_swap ? 0 : 2] * 32767);
+    o2[1] = (int16_t)(out[lr_swap ? 1 : 3] * 32767);
     // Замер окна границы потока: ищем максимум размаха, а не разницу между
     // отсчётами. Размах не зависит от того, попал ли сам щелчок в этот кадр:
     // если ступенька есть, она сделает максимум большим в любом случае.
@@ -970,7 +983,7 @@ void saveAllParams() {
   b.eq0 = eq_db[0]; b.eq1 = eq_db[1]; b.eq2 = eq_db[2];
   b.bal = bal; b.tvol = test_vol.load();
   for (uint8_t c = 0; c < 4; c++) { b.chh[c] = ch_hp[c]; b.chl[c] = ch_lp[c]; b.dly[c] = ch_delay[c]; }
-  b.invm = (inv_ch[0]?1:0)|(inv_ch[1]?2:0)|(inv_ch[2]?4:0)|(inv_ch[3]?8:0);
+  b.swp = lr_swap ? 1 : 0;
   bool ok = (prefs.putBytes("blob", &b, sizeof(b)) == sizeof(b));
   uint32_t dt = millis() - t0;
   if (dt > nvs_max_ms.load(std::memory_order_relaxed)) nvs_max_ms.store(dt, std::memory_order_relaxed);
@@ -989,7 +1002,6 @@ void applyBlob(const PBlob &b) {
   bal = b.bal; test_vol.store(b.tvol);
   for (uint8_t c = 0; c < 4; c++) {
     ch_hp[c] = b.chh[c]; ch_lp[c] = b.chl[c]; ch_delay[c] = b.dly[c];
-    inv_ch[c] = (b.invm >> c) & 1;
   }
 }
 
@@ -1113,16 +1125,8 @@ void dispatchCommand(const char *cmd) {
   else if (cmdIs(cmd, "xo:")) {
     if (safeCmdVal(cmd, v, 0, 1)) { xo_on = ((int)v == 1); TOUCH(); }
   }
-  else if (cmdIs(cmd, "inv:")) {
-    bool changed = false;
-    if (cmdArgIs(cmd, "off")) {
-      for (uint8_t c = 0; c < 4; c++) inv_ch[c] = false;
-      changed = true;
-    } else if (safeCmdVal(cmd, v, 0, 3)) {
-      inv_ch[(int)v] = !inv_ch[(int)v];
-      changed = true;
-    }
-    if (changed) TOUCH();
+  else if (cmdIs(cmd, "swap:")) {
+    if (safeCmdVal(cmd, v, 0, 1)) { lr_swap = ((int)v == 1); TOUCH(); }
   }
   else if (strncmp(cmd, "chhp:", 5) == 0 || strncmp(cmd, "chlp:", 5) == 0) {
     bool is_hp = (cmd[2] == 'h');
@@ -1186,8 +1190,7 @@ void dispatchCommand(const char *cmd) {
     say("XO: " + String(xo_type == 2 ? "LR4" : "Butter") + (xo_on ? " ON" : " OFF"));
     say("TLF=" + String(tlf_db) + "dB THF=" + String(thf_db) + "dB");
     say("EQ: L=" + String(eq_db[0]) + " M=" + String(eq_db[1]) + " H=" + String(eq_db[2]));
-    String inv = String(inv_ch[0]?1:0) + String(inv_ch[1]?1:0) + String(inv_ch[2]?1:0) + String(inv_ch[3]?1:0);
-    say("INV: " + inv);
+    say(String("SWP: ") + String(lr_swap ? 1 : 0));
     say(String("BT: ") + String(bt_connected.load() ? "ON" : "OFF") + " | SPP: " + String(SerialBT.hasClient() ? "ON" : "OFF"));
     say(String("Src: ") + String(src_48k.load() ? "48" : "44.1") + " kHz");
     say("Test: " + String(test_mode.load()) + " TVol=" + String((int)(test_vol.load()*100)) + "%");
@@ -1241,7 +1244,7 @@ void dispatchCommand(const char *cmd) {
     say(F("vol:N v0:N v1:N bal:N mute:N"));
     say(F("fc:N hp:N sub:0/1 xo:0/1 xotype:1-2 tlf:N thf:N"));
     say(F("eql:N eqm:N eqh:N preset:0-3"));
-    say(F("inv:0-3 inv:off"));
+    say(F("swap:0/1 (swap L/R outputs)"));
     say(F("chhp:C:F chlp:C:F delayC:N"));
     say(F("tvol:N (test volume, default 6%)"));
     say(F("play pause next prev"));
@@ -1284,7 +1287,7 @@ void updateGeneralDisplay() {
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v34 (dsp reset, fade out, click probe)"));
+  Serial.println(F("\n\nboot: bi-amp v35 (lr swap instead of phase inversion)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 
@@ -1295,7 +1298,18 @@ void setup() {
     applyBlob(b);
     xo_on = (b.xoon != 0);
     sanitizeParams();
-    Serial.println(F("NVS: blob loaded (v22)"));
+    Serial.println(F("NVS: blob loaded (v23)"));
+  } else if (got == sizeof(b) && b.version == 22) {
+    // Блоб v22 отличается только названием байта invm → swp, размер и
+    // смещения те же. Перестановка Л/П на этом месте была нулём, поэтому
+    // её значение не восстанавливаем: старый invm относился к инверсии
+    // фазы, и переносить его в swap было бы неверно.
+    applyBlob(b);
+    xo_on = (b.xoon != 0);
+    lr_swap = false;
+    sanitizeParams();
+    saveAllParams();
+    Serial.println(F("NVS: blob migrated v22 -> v23"));
   } else if (got == sizeof(b) - 1 && b.version == 21) {
     // Блоб v21 — та же упакованная структура без последнего байта xoon.
     // Структура дописана в конец, поэтому прежние поля лежат на тех же
@@ -1304,9 +1318,10 @@ void setup() {
     // все настройки, потому что saveAllParams пишет только ключ blob.
     applyBlob(b);
     xo_on = true;
+    lr_swap = false;
     sanitizeParams();
     saveAllParams();
-    Serial.println(F("NVS: blob migrated v21 -> v22"));
+    Serial.println(F("NVS: blob migrated v21 -> v23"));
   } else {
     for (uint8_t c = 0; c < 2; c++) {
       char kv[4] = {'v', (char)('0'+c), 0, 0};
@@ -1321,8 +1336,7 @@ void setup() {
     bal = prefs.getFloat("bal", 0);
     xo_type = prefs.getUChar("xot", 1);
     { float tv = prefs.getFloat("tvol", 0.06f); test_vol.store(tv); }
-    uint8_t inv_mask = prefs.getUChar("invm", 0);
-    for (uint8_t c = 0; c < 4; c++) inv_ch[c] = (inv_mask >> c) & 1;
+    lr_swap = prefs.getBool("swp", false);
     for (uint8_t c = 0; c < 4; c++) {
       char kh[4] = {'c', (char)('0'+c), 'h', 0};
       char kl[4] = {'c', (char)('0'+c), 'l', 0};
@@ -1332,7 +1346,7 @@ void setup() {
     }
     sanitizeParams();
     saveAllParams();
-    Serial.println(F("NVS: legacy migrated to v22"));
+    Serial.println(F("NVS: legacy migrated to v23"));
   }
   scheduleFilterUpdate();
 
