@@ -8,7 +8,7 @@
 с раздельными низкочастотными и высокочастотными каналами.
 
 [![Лицензия](https://img.shields.io/badge/лицензия-GPLv3-blue.svg)](LICENSE)
-[![Прошивка](https://img.shields.io/badge/прошивка-v29-ff5c00.svg)](firmware/DOCUMENTATION.md)
+[![Прошивка](https://img.shields.io/badge/прошивка-v34-ff5c00.svg)](firmware/DOCUMENTATION.md)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3ddc84.svg)](android-app/)
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](.github/workflows/ci.yml)
 
@@ -63,8 +63,8 @@ ESP32 принимает аудиопоток по **Bluetooth Classic A2DP** и
 esp32-biamp/
 ├── firmware/                    # Прошивка ESP32
 │   ├── ESP32_BiAmp/
-│   │   └── ESP32_BiAmp.ino      # Весь скетч, 1021 строка
-│   ├── DOCUMENTATION.md         # Полная техническая документация (v29)
+│   │   └── ESP32_BiAmp.ino      # Весь скетч, 1419 строк
+│   ├── DOCUMENTATION.md         # Полная техническая документация (v34)
 │   ├── tools/                   # Скрипты сборки и прошивки (PowerShell)
 │   └── .vscode/                 # Задачи VS Code
 ├── android-app/                 # Android-приложение
@@ -124,7 +124,7 @@ ESP32                Зона 1 (НЧ/ВЧ, левая)     Зона 2 (НЧ/В�
 
 ### 1. Прошивка ESP32
 
-Требуется [`arduino-cli`](https://arduino-ide.github.io/arduino-cli/latest/installation/).
+Требуется [`arduino-cli`](https://arduino.github.io/arduino-cli/latest/installation/).
 
 ```bash
 arduino-cli core update-index
@@ -182,7 +182,7 @@ arduino-cli upload -p COM5 \
 При загрузке в мониторе должно появиться:
 
 ```
-boot: bi-amp v29 (ring wrap fixed)
+boot: bi-amp v34 (dsp reset, fade out, click probe)
 Ring selftest: PASS frames=10752/10752 bad=0 drops=0
 A2DP: started
 SPP: OK
