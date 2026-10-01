@@ -56,6 +56,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        // Раннер для instrumented-тестов: без него androidTest не запустится.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -127,4 +129,19 @@ dependencies {
     // Виртуальное время для тестов очереди команд: окно троттлинга в 150 мс
     // иначе проверялось бы по скорости машины.
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+
+    // ── Instrumented-тесты (androidTest) ──────────────────────────
+    // Их смысл — проверить то, чего не видит юнит-тест: поведение ViewModel
+    // и композаблов на настоящем Android-рантайме с реальными SharedPreferences,
+    // с реальными потоками и реальным тактильным вводом. Сопряжённый ESP32
+    // для них не нужен: соединение подменяется заглушкой SppClient.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    // Compose-тесты на реальном устройстве: ищут узлы по подписям и жмут их.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Тестовые зависимости попадают и в отладочный APK — без activity
+    // из ui-test-manifest не запускается пустая ComponentActivity.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

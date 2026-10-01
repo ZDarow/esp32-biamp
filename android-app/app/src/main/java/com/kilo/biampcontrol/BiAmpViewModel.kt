@@ -30,6 +30,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kilo.biampcontrol.bt.*
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,9 +40,21 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
+/**
+ * @param createClient фабрика соединения. Продлена параметром со значением
+ *   по умолчанию ради instrumented-тестов: без сопряжённого ESP32 реальный
+ *   [SppManager] не может подключиться, а проверять нужно поведение ViewModel
+ *   поверх заглушки. Приложение пользуется этим конструктором через
+ *   `by viewModels()`: фабрика AndroidViewModel умеет только его.
+ */
+class BiAmpViewModel internal constructor(
+    app: Application,
+    createClient: (CoroutineScope) -> SppClient
+) : AndroidViewModel(app) {
 
-    private val spp = SppManager(viewModelScope)
+    constructor(app: Application) : this(app, { SppManager(it) })
+
+    private val spp: SppClient = createClient(viewModelScope)
     private val sender = CommandSender(spp, viewModelScope)
     private val prefs = DevicePrefs(app)
 

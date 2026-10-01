@@ -46,9 +46,25 @@ interface SppTransport {
 }
 
 /**
+ * Всё, что ViewModel знает о соединении с усилителем.
+ *
+ * Вынесено в интерфейс, чтобы instrumented-тесты подставляли заглушку:
+ * реальный [SppManager] без сопряжённого ESP32 не может ни подключиться,
+ * ни прочитать строку, а проверять надо именно поведение ViewModel —
+ * разбор `status`, сброс буфера при переподключении, снятие флага
+ * синхронизации. Тесты на [SppTransport] уже есть в unit-варианте.
+ */
+interface SppClient : SppTransport {
+    val state: StateFlow<ConnState>
+    val lines: SharedFlow<String>
+    fun connect(dev: BluetoothDevice)
+    fun disconnect()
+}
+
+/**
  * RFCOMM/SPP-клиент: подключение, автореконнект (5 попыток), построчное чтение.
  */
-class SppManager(private val scope: CoroutineScope) : SppTransport {
+class SppManager(private val scope: CoroutineScope) : SppClient {
 
     companion object {
         val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
@@ -56,10 +72,10 @@ class SppManager(private val scope: CoroutineScope) : SppTransport {
     }
 
     private val _state = MutableStateFlow(ConnState.DISCONNECTED)
-    val state: StateFlow<ConnState> = _state
+    override val state: StateFlow<ConnState> = _state
 
     private val _lines = MutableSharedFlow<String>(extraBufferCapacity = 64)
-    val lines: SharedFlow<String> = _lines
+    override val lines: SharedFlow<String> = _lines
 
     /**
      * Всё состояние соединения живёт под [lock], а [generation] — номер
@@ -77,14 +93,14 @@ class SppManager(private val scope: CoroutineScope) : SppTransport {
     private var job: Job? = null
     @Volatile private var wantConnection = false
 
-    fun connect(dev: BluetoothDevice) {
+    override fun connect(dev: BluetoothDevice) {
         val gen = synchronized(lock) { ++generation }
         wantConnection = true
         job?.cancel()
         job = scope.launch { connectLoop(dev, gen) }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         wantConnection = false
         // Сокет отрываем и закрываем ДО отмены задачи: разблокирует readLine,
         // который иначе остался бы висеть до прихода следующего пакета.
