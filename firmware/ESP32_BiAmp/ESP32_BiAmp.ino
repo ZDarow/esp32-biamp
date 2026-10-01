@@ -161,6 +161,12 @@ bool  xo_on = true;
 // динамике неправильно. Инверсия фазы для этого не годится — она
 // переворачивает сигнал, а меняет стороны света.
 bool  lr_swap = false;
+// Диагностическое дублирование выходов: при true оба I²S-порта получают
+// байт-в-байт один и тот же блок, то есть на оба ЦАПа уходит идентичный
+// поток. Нужно, чтобы осциллографом или вторым усилителем проверить, что
+// физически приходит на каждое гнездо и одинаково ли. В обычной работе
+// выключено, и каналы 2,3 уходят в правый разъём как положено.
+bool  dup_out = false;
 float ch_hp[4] = {0, 0, 0, 0};
 float ch_lp[4] = {0, 0, 0, 0};
 uint16_t ch_delay[4] = {0, 0, 0, 0};
@@ -177,7 +183,13 @@ std::atomic<uint32_t> g_in_frames{0};
 
 std::atomic<uint8_t> test_mode{0};
 std::atomic<float>   test_freq{440.0f};
-std::atomic<float>   test_vol{0.06f};
+// Громкость тест-сигнала. Акустика подключена к усилителям и играет в
+// комнате, поэтому по умолчанию 4%, а жёсткий потолок 6%: тест слышно как
+// щелчок проверки, а не как музыка. Потолок держит сам safeCmdVal() —
+// выставить выше нельзя даже вручную.
+#define TEST_VOL_DEFAULT 0.04f
+#define TEST_VOL_MAX     0.06f
+std::atomic<float>   test_vol{TEST_VOL_DEFAULT};
 
 std::atomic<uint32_t> starve_cnt{0}, starve_max_ms{0};
 // Отметка времени последнего пакета A2DP для счётчика Starve. Сбрасывается
@@ -214,7 +226,9 @@ struct AudioParams {
   // обязан приходить тем же снимком. Отдельная переменная, которую читает
   // audioTask, а пишет loop, — это гонка: компилятор вправе переставить
   // чтение относительно записи, и кадр может уйти с перепутанными каналами.
+  // Дублирование едет в том же снимке по той же причине.
   bool  swap;
+  bool  dup;
 };
 
 static AudioParams shadow_ap;            // владеет loop, пишется под ctrl_mux
@@ -367,6 +381,7 @@ void scheduleFilterUpdate() {
   tmp.mute[0] = muted_z[0]; tmp.mute[1] = muted_z[1];
   for (uint8_t c = 0; c < 4; c++) { tmp.dly[c] = ch_delay[c]; }
   tmp.swap = lr_swap;
+  tmp.dup = dup_out;
   portENTER_CRITICAL(&ctrl_mux);
   memcpy(&shadow_ap, &tmp, sizeof(tmp));
   ap_dirty.store(true, std::memory_order_release);
@@ -505,6 +520,13 @@ void processBlock(const int16_t *in, int n) {
   computeTargets(test_on, tgt);
   uint8_t mask = test_on ? testMaskOf(tm) : 0xF;
 
+  // Какой буфер физически уходит в каждый порт. При дублировании оба порта
+  // читают один и тот же буфер, иначе в z2 ушёл бы блок, который никто не
+  // заполнил: подменить только раскладку слотов мало, нужно ещё и то, откуда
+  // берётся write() — он читает буфер поимённо.
+  int16_t *const pb1 = bz1;
+  int16_t *const pb2 = ap.dup ? bz1 : bz2;
+
   for (int f = 0; f < n; f++) {
     // Гашение идёт быстрее обычной рампы громкости, но всё ещё плавно:
     // выход не должен прыгнуть к нулю скачком.
@@ -528,18 +550,28 @@ void processBlock(const int16_t *in, int n) {
     // Флаг берётся из ap — личного снимка задачи вывода, а не из общей
     // переменной: иначе переключатель мог бы смениться посреди блока и
     // половина кадра ушла бы в левый разъём, половина — в правый.
-    int16_t *o1; int16_t *o2;
-    if (ap.swap) { o1 = bz2 + f * 2; o2 = bz1 + f * 2; }
-    else         { o1 = bz1 + f * 2; o2 = bz2 + f * 2; }
-    o1[0] = (int16_t)(out[ap.swap ? 2 : 0] * 32767);
-    o1[1] = (int16_t)(out[ap.swap ? 3 : 1] * 32767);
-    o2[0] = (int16_t)(out[ap.swap ? 0 : 2] * 32767);
-    o2[1] = (int16_t)(out[ap.swap ? 1 : 3] * 32767);
+    int16_t *o1 = pb1 + f * 2;
+    int16_t *o2 = pb2 + f * 2;
+    if (ap.dup) {
+      // Диагностика: оба указателя на один и тот же буфер, поэтому в z1 и z2
+      // уходит побайтово идентичный блок. Дублировать нужно именно поток на
+      // ЦАП, а не только набор параметров, иначе сравнивать было бы нечего.
+      // Каналы 2,3 в этом режиме не выводятся: обе пары полос сходятся в
+      // левый буфер, поэтому их обработка уходит в никуда.
+      o1[0] = (int16_t)(out[0] * 32767);
+      o1[1] = (int16_t)(out[1] * 32767);
+    }
+    else {
+      o1[0] = (int16_t)(out[ap.swap ? 2 : 0] * 32767);
+      o1[1] = (int16_t)(out[ap.swap ? 3 : 1] * 32767);
+      o2[0] = (int16_t)(out[ap.swap ? 0 : 2] * 32767);
+      o2[1] = (int16_t)(out[ap.swap ? 1 : 3] * 32767);
+    }
     // Замер окна границы потока: ищем максимум размаха, а не разницу между
     // отсчётами. Размах не зависит от того, попал ли сам щелчок в этот кадр:
     // если ступенька есть, она сделает максимум большим в любом случае.
     if (click_probe_armed.load(std::memory_order_relaxed)) {
-      uint32_t m1 = abs16(bz1[f * 2]), m2 = abs16(bz2[f * 2]);
+      uint32_t m1 = abs16(pb1[f * 2]), m2 = abs16(pb2[f * 2]);
       if (m1 > click_start_max[0] || m2 > click_start_max[1]) {
         if (m1 > click_start_max[0]) click_start_max[0] = m1;
         if (m2 > click_start_max[1]) click_start_max[1] = m2;
@@ -564,8 +596,8 @@ void processBlock(const int16_t *in, int n) {
     }
   }
   uint32_t t_wr = micros();
-  bool w1 = (i2s_z1.write((uint8_t *)bz1, bytes) == bytes);
-  bool w2 = (i2s_z2.write((uint8_t *)bz2, bytes) == bytes);
+  bool w1 = (i2s_z1.write((uint8_t *)pb1, bytes) == bytes);
+  bool w2 = (i2s_z2.write((uint8_t *)pb2, bytes) == bytes);
   uint32_t dw = micros() - t_wr;
   if (dw > wr_max_us.load(std::memory_order_relaxed)) wr_max_us.store(dw, std::memory_order_relaxed);
   if (!w1) { und_z[0].fetch_add(1, std::memory_order_relaxed); logEvent(2, 0); }
@@ -1030,7 +1062,8 @@ void sanitizeParams() {
   if (!isfinite(bal) || bal < -10 || bal > 10) bal = 0;
   for (uint8_t e = 0; e < 3; e++) if (!isfinite(eq_db[e]) || eq_db[e] < -12 || eq_db[e] > 12) eq_db[e] = 0;
   if (xo_type < 1 || xo_type > 2) xo_type = 1;
-  { float tv = test_vol.load(); if (!isfinite(tv) || tv < 0 || tv > 1) test_vol.store(0.06f); }
+  { float tv = test_vol.load();
+    if (!isfinite(tv) || tv < 0 || tv > TEST_VOL_MAX) test_vol.store(TEST_VOL_DEFAULT); }
   for (uint8_t c = 0; c < 4; c++) {
     if (!isfinite(ch_hp[c]) || ch_hp[c] < 0 || ch_hp[c] > 20000) ch_hp[c] = 0;
     if (!isfinite(ch_lp[c]) || ch_lp[c] < 0 || ch_lp[c] > 20000) ch_lp[c] = 0;
@@ -1144,6 +1177,12 @@ void dispatchCommand(const char *cmd) {
   else if (cmdIs(cmd, "swap:")) {
     if (safeCmdVal(cmd, v, 0, 1)) { lr_swap = ((int)v == 1); TOUCH(); }
   }
+  else if (cmdIs(cmd, "dup:")) {
+    // Без TOUCH намеренно: диагностический режим не должен пережить
+    // перезагрузку. Забытый dup опаснее забытого swap — после перезагрузки
+    // плата продолжила бы сливать обе пары полос в один разъём.
+    if (safeCmdVal(cmd, v, 0, 1)) { dup_out = ((int)v == 1); scheduleFilterUpdate(); }
+  }
   else if (strncmp(cmd, "chhp:", 5) == 0 || strncmp(cmd, "chlp:", 5) == 0) {
     bool is_hp = (cmd[2] == 'h');
     const char *rest = cmd + 5;
@@ -1166,7 +1205,7 @@ void dispatchCommand(const char *cmd) {
     if (q && parseFloat(q + 1, fv, 0, MAX_DELAY_SAMPLES)) { ch_delay[ch] = (uint16_t)fv; TOUCH(); }
   }
   else if (cmdIs(cmd, "tvol:")) {
-    if (safeCmdVal(cmd, v, 0, 100)) {
+    if (safeCmdVal(cmd, v, 0, (int)(TEST_VOL_MAX * 100.0f))) {
       test_vol.store(v / 100.0f);
       paramsDirty = true; paramsChangedAt = millis();
       say("Test volume: " + String((int)v) + "%");
@@ -1207,6 +1246,7 @@ void dispatchCommand(const char *cmd) {
     say("TLF=" + String(tlf_db) + "dB THF=" + String(thf_db) + "dB");
     say("EQ: L=" + String(eq_db[0]) + " M=" + String(eq_db[1]) + " H=" + String(eq_db[2]));
     say(String("SWP: ") + String(lr_swap ? 1 : 0));
+    if (dup_out) say(String("DUP: 1 (z2 == z1, каналы 2,3 не выводятся)"));
     say(String("BT: ") + String(bt_connected.load() ? "ON" : "OFF") + " | SPP: " + String(SerialBT.hasClient() ? "ON" : "OFF"));
     say(String("Src: ") + String(src_48k.load() ? "48" : "44.1") + " kHz");
     say("Test: " + String(test_mode.load()) + " TVol=" + String((int)(test_vol.load()*100)) + "%");
@@ -1261,8 +1301,9 @@ void dispatchCommand(const char *cmd) {
     say(F("fc:N hp:N sub:0/1 xo:0/1 xotype:1-2 tlf:N thf:N"));
     say(F("eql:N eqm:N eqh:N preset:0-3"));
     say(F("swap:0/1 (swap L/R outputs)"));
+    say(F("dup:0/1 (same block to both z1 and z2, diag only)"));
     say(F("chhp:C:F chlp:C:F delayC:N"));
-    say(F("tvol:N (test volume, default 6%)"));
+    say(F("tvol:N (test volume, default 4%, max 6%)"));
     say(F("play pause next prev"));
     say(F("test:all/l/r/woof/tweet/1-4/anti/sweep/off tf:N"));
     say(F("status stats click evlog heap"));
@@ -1363,7 +1404,7 @@ void setup() {
     eq_db[0] = prefs.getFloat("eql", 0); eq_db[1] = prefs.getFloat("eqm", 0); eq_db[2] = prefs.getFloat("eqh", 0);
     bal = prefs.getFloat("bal", 0);
     xo_type = prefs.getUChar("xot", 1);
-    { float tv = prefs.getFloat("tvol", 0.06f); test_vol.store(tv); }
+    { float tv = prefs.getFloat("tvol", TEST_VOL_DEFAULT); test_vol.store(tv); }
     lr_swap = prefs.getBool("swp", false);
     for (uint8_t c = 0; c < 4; c++) {
       char kh[4] = {'c', (char)('0'+c), 'h', 0};
