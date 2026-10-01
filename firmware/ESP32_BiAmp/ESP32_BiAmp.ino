@@ -1,7 +1,7 @@
 /**
  * @file ESP32_BiAmp.ino
  * @brief Би-амп ESP32: приём A2DP-аудио и вывод на два I2S-порта,
- *        управление по Bluetooth SPP. Версия 31.
+ *        управление по Bluetooth SPP. Версия 32.
  *
  * Описание архитектуры, всех команд и диагностики — в firmware/DOCUMENTATION.md.
  *
@@ -35,6 +35,14 @@
  *             (заблокированный экран останавливает A2DP, но is_playing
  *             остаётся true) раньше попадала в него целиком и давала
  *             161 с «недокорма» при нулевых Underrun и RingDrops.
+ *        v32: щелчок на остановке потока устранён. Раньше телефон замолкал,
+ *             задача вывода простаивала с пустым кольцом, DMA доигрывал
+ *             последний блок и замирал на ненулевом отсчёте — усилитель
+ *             получал ступеньку. Теперь на переходе «играем → не играем»
+ *             задача вывода прогоняет через DSP тишину, уводя gain в ноль
+ *             рампой FADE_K, и дописывает в I2S нулевой блок (событие t=8).
+ *             Скорость гашения отдельная от рампы громкости: RAMP_K даёт
+ *             постоянную времени 22 мс, на ноль уходит больше 200 мс.
  *
  * @author Kilo
  * @license GNU General Public License v3.0 or later
@@ -71,6 +79,12 @@
 #define SAMPLE_RATE     44100
 #define BITS_PER_SAMPLE 16
 #define RAMP_K          0.001f
+// Рампа гашения при остановке потока. Обычная RAMP_K даёт постоянную времени
+// около 22 мс, на выход в ноль уходит больше 200 мс — слышно как «висит звук».
+// Для гашения нужен отклик около 4.5 мс: до −60 дБ выход доходит за 46 мс,
+// но в уши попадает только последняя часть затухания.
+#define FADE_K          0.005f
+#define FADE_EPS        5.0e-4f   // −66 дБ от полной шкалы
 #define RATIO48         (48000.0f / 44100.0f)
 #define NVS_NS          "biampv12"
 #define NVS_SAVE_DELAY  2000
@@ -136,6 +150,9 @@ std::atomic<float>   test_vol{0.06f};
 std::atomic<uint32_t> starve_cnt{0}, starve_max_ms{0};
 // Ставится колбэком A2DP на старте потока, снимается задачей вывода.
 std::atomic<bool> dsp_reset_pending{false};
+// Ставится колбэком A2DP на остановке потока: выход нужно плавно свести
+// в ноль, иначе DMA замолкает на ненулевом отсчёте и усилитель щёлкает.
+std::atomic<bool> dsp_fade_pending{false};
 std::atomic<uint32_t> dsp_max_us{0}, wr_max_us{0};
 std::atomic<uint32_t> loop_max_ms{0}, nvs_max_ms{0};
 std::atomic<uint32_t> und_z[2] = {{0}, {0}};
@@ -167,6 +184,9 @@ static float chst[4][2][2];             // состояния канальных
 static float delay_buf[4][DELAY_BUF_SIZE];
 static uint16_t delay_idx[4] = {0, 0, 0, 0};
 static float gain[4] = {0, 0, 0, 0};
+// Живёт только в задаче вывода: 1 во время гашения потока. computeTargets
+// обнуляет цели, и рампы доводят gain до нуля мягко, без ступеньки на выходе.
+static bool dsp_fade = false;
 static int16_t bz1[BLOCK_FRAMES * 2], bz2[BLOCK_FRAMES * 2];
 static int16_t inbuf[BLOCK_FRAMES * 2];
 
@@ -371,6 +391,12 @@ void refreshParams() {
 }
 
 void computeTargets(bool test_on, float tgt[4]) {
+  // Гашение: цели в ноль независимо от громкости и баланса, иначе рампы
+  // держали бы выход на прежнем уровне и щелчок на остановке остался бы.
+  if (dsp_fade) {
+    for (uint8_t c = 0; c < 4; c++) tgt[c] = 0.0f;
+    return;
+  }
   float tv = test_vol.load(std::memory_order_relaxed);
   for (uint8_t c = 0; c < 4; c++) {
     uint8_t z = c >> 1;
@@ -409,7 +435,10 @@ void processBlock(const int16_t *in, int n) {
   uint8_t mask = test_on ? testMaskOf(tm) : 0xF;
 
   for (int f = 0; f < n; f++) {
-    for (uint8_t c = 0; c < 4; c++) gain[c] += (tgt[c] - gain[c]) * RAMP_K;
+    // Гашение идёт быстрее обычной рампы громкости, но всё ещё плавно:
+    // выход не должен прыгнуть к нулю скачком.
+    float rk = dsp_fade ? FADE_K : RAMP_K;
+    for (uint8_t c = 0; c < 4; c++) gain[c] += (tgt[c] - gain[c]) * rk;
     float raw[4], out[4];
     for (uint8_t s = 0; s < 2; s++) {
       float x = in[f * 2 + s] * (1.0f / 32768.0f);
@@ -653,6 +682,42 @@ void resetDspState() {
   logEvent(7, 0);
 }
 
+// Плавное сведение выхода в ноль при остановке потока.
+//
+// Пока телефон молчит, кольцо пусто и задача вывода простаивает, не записав
+// в I2S ничего: DMA доигрывает последний блок и замирает на нём. Если в этом
+// отсчёте ненулевое значение (а оно почти всегда ненулевое — сигнал живой),
+// усилитель получает ступеньку и динамик щёлкает на паузе.
+//
+// Поэтому при остановке потока прогоняем через DSP тишину, уводя gain в ноль
+// рампой FADE_K, и дописываем в I2S блок, который уже целиком нулевой: DMA
+// замирает на нуле, и следующий поток начинается с тишины, а не со ступеньки.
+#define FADE_MAX_FRAMES 2048   // 46 мс @44.1 кГц
+void fadeOutDsp() {
+  dsp_fade = true;
+  static int16_t zbuf[BLOCK_FRAMES * 2];
+  memset(zbuf, 0, sizeof(zbuf));
+  uint32_t frames = 0;
+  // Выходим, как только gain всех каналов ниже FADE_EPS, иначе жжём лишние
+  // 46 мс тишины в I2S на каждой паузе. Потолок нужен на случай, если рампы
+  // не достигли нуля: громкость могла вырасти в ходе гашения (новые цели от
+  // команды vol:), и тогда gain снова растёт, а не падает.
+  while (frames < FADE_MAX_FRAMES) {
+    processBlock(zbuf, BLOCK_FRAMES);
+    frames += BLOCK_FRAMES;
+    bool quiet = true;
+    for (uint8_t c = 0; c < 4; c++) {
+      if (gain[c] > FADE_EPS) { quiet = false; break; }
+    }
+    if (quiet) break;
+  }
+  dsp_fade = false;
+  // Последний блок нулевой целиком: DMA останавливается на тишине.
+  processBlock(zbuf, BLOCK_FRAMES);
+  for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
+  logEvent(8, (uint16_t)frames);
+}
+
 void audioTask(void *) {
   setI2SWriteTimeoutMs(pdMS_TO_TICKS(I2S_WRITE_TIMEOUT_MS));
   for (;;) {
@@ -662,8 +727,17 @@ void audioTask(void *) {
     // двухминутной давности, и первый же блок выходит со ступенькой — щелчком.
     // Сброс делается здесь, в задаче вывода: из колбэка A2DP это была бы гонка
     // с processBlock по тем же переменным.
-    if (dsp_reset_pending.exchange(false, std::memory_order_acquire)) resetDspState();
+    if (dsp_reset_pending.exchange(false, std::memory_order_acquire)) {
+      resetDspState();
+      // Поток успел возобновиться, пока гашение ждало в очереди: гасить уже
+      // нечего, а 34 мс нуля в начале трека были бы слышны как заикание.
+      dsp_fade_pending.store(false, std::memory_order_release);
+    }
+    // Остановка потока: сначала гасим выход, и только потом берём новые данные.
+    // Иначе остаток старого блока попал бы в I2S после начала тишины.
+    bool fading = dsp_fade_pending.exchange(false, std::memory_order_acquire);
     refreshParams();
+    if (fading) fadeOutDsp();
     int n;
     bool from_ring = false;
     if (test_mode.load(std::memory_order_relaxed) != 0) n = genTestBlock(inbuf, BLOCK_FRAMES);
@@ -749,6 +823,13 @@ void audio_state_cb(esp_a2d_audio_state_t state, void *) {
     // паузы biquad'ы хранят отсчёты двухминутной давности, и первый блок
     // выходит со ступенькой — щелчком на старте.
     dsp_reset_pending.store(true, std::memory_order_release);
+    ring_flush.store(true);
+  } else if (!now && was_playing) {
+    // Остановка потока: телефон замолчал, но усилитель ещё держит последний
+    // отсчёток. Просим задачу вывода свести выход в ноль — иначе щелчок на паузе.
+    // Порядок важен: сначала гашение, остаток кольца не должен попасть в I2S
+    // после него, поэтому кольцо сбрасывается тут же.
+    dsp_fade_pending.store(true, std::memory_order_release);
     ring_flush.store(true);
   }
   was_playing = now;
