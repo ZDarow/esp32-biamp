@@ -1284,7 +1284,7 @@ void updateGeneralDisplay() {
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v31 (dsp reset on stream start)"));
+  Serial.println(F("\n\nboot: bi-amp v34 (dsp reset, fade out, click probe)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 
