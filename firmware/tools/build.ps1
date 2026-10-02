@@ -1,4 +1,4 @@
-﻿# Компиляция скетча BT_esp
+﻿# Компиляция скетча ESP32_BiAmp
 # Использование: pwsh -File .\tools\build.ps1
 
 . "$PSScriptRoot\common.ps1"

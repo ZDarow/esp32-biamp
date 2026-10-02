@@ -1,4 +1,4 @@
-﻿# Сверка матрицы владения путями.
+# Сверка матрицы владения путями.
 #
 # Матрица объявлена в трёх местах намеренно: хук работает офлайн, CODEOWNERS —
 # на сервере, BRANCHING.md объясняет причину. Обратная сторона — их можно
@@ -33,7 +33,7 @@ $inFn = $false
 $hookRules = @{}
 foreach ($line in $hook) {
     if ($line -match '^path_owner\(\)') { $inFn = $true; continue }
-    if ($inFn -and $line -match '^\}') { $inFn = $false; continue }
+    if ($inFn -and $line -match '^\s*\}') { $inFn = $false; continue }
     if (-not $inFn) { continue }
     # Правило выглядит как:  <шаблоны>) echo "<владелец>"
     # Владелец может содержать дефис (pc-client), поэтому класс символов
@@ -91,6 +91,38 @@ foreach ($k in $ownerRulesAll.Keys) { if ($k.TrimStart('/') -ne '*') { $ownerRul
 if ($hookRules.Count -eq 0) { throw "В хуке нет ни одного конкретного правила, кроме '*'" }
 if ($ownerRules.Count -eq 0) { throw "В CODEOWNERS нет ни одного конкретного правила, кроме '*'" }
 
+# Проверка наличия catch-all '*' в обоих наборах: без него новые файлы
+# остаются без владельца — хук их пропустит (→ * → unknown), а CODEOWNERS
+# назначит @integrator по умолчанию, и никто не заметит расхождения.
+if (-not ($hookRulesAll.Keys | Where-Object { $_.TrimStart('/') -eq '*' })) {
+    $problems += "В хуке отсутствует catch-all '*' (правило *) — новые файлы не будут проверяться на принадлежность направлению"
+}
+if (-not ($ownerRulesAll.Keys | Where-Object { $_.TrimStart('/') -eq '*' })) {
+    $problems += "В CODEOWNERS отсутствует catch-all '*' — новые файлы получат владельца по умолчанию без явного назначения"
+}
+
+# Нормализует паттерн: убирает ведущий / и trailing /*.
+function Normalize-Pattern([string]$p) {
+    $p = $p.TrimStart('/')
+    $p = $p -replace '\s*\*\s*$', ''
+    return $p
+}
+
+# Возвращает владельца для пути: точное совпадение, затем покрытие по префиксу.
+# CODEOWNERS пишет с ведущим слэшем ('/firmware/'), хук — без ('firmware/*'),
+# поэтому оба нормализуются к общему виду для сравнения.
+function Get-CoveringOwner([string]$path, [hashtable]$rules) {
+    $needle = Normalize-Pattern $path
+    foreach ($rule in $rules.Keys) {
+        if ((Normalize-Pattern $rule) -eq $needle) { return $rules[$rule] }
+    }
+    foreach ($rule in $rules.Keys) {
+        $r = Normalize-Pattern $rule
+        if ($r -and $r.EndsWith('/') -and $needle.StartsWith($r)) { return $rules[$rule] }
+    }
+    return $null
+}
+
 # Покрыт ли путь набором правил: правило совпадает само с собой, покрывает
 # путь по префиксу, либо путь покрывает правило по своему префиксу.
 # CODEOWNERS пишет с ведущим слэшем ('/firmware/'), хук — без ('firmware/*'),
@@ -122,6 +154,30 @@ foreach ($path in $ownerRules.Keys) {
 foreach ($path in $hookRules.Keys) {
     if (-not (Test-Covered $path $ownerRules)) {
         $problems += "хук описывает '$path' (владелец $(Resolve-Owner $hookRules[$path])), но в CODEOWNERS его нет"
+    }
+}
+
+# Сравнение значений владельцев: для каждого пути проверяем, что хук и
+# CODEOWNERS приписывают его одному и тому же владельцу. Покрытие путей
+# (Test-Covered выше) гарантирует, что путь известен обеим сторонам, но не
+# гарантирует, что владелец совпадает — вот это сравнение и ловит расхождения
+# вроде «хук: firmware, CODEOWNERS: @integrator».
+$allPaths = @{}
+foreach ($p in $hookRulesAll.Keys) {
+    if ($p.TrimStart('/') -ne '*') { $allPaths[(Normalize-Pattern $p)] = $null }
+}
+foreach ($p in $ownerRulesAll.Keys) {
+    if ($p.TrimStart('/') -ne '*') { $allPaths[(Normalize-Pattern $p)] = $null }
+}
+foreach ($path in $allPaths.Keys) {
+    $hookOwner = Get-CoveringOwner $path $hookRules
+    $coOwner = Get-CoveringOwner $path $ownerRules
+    if ($hookOwner -and $coOwner) {
+        $rh = Resolve-Owner $hookOwner
+        $rc = Resolve-Owner $coOwner
+        if ($rh -ne $rc) {
+            $problems += "Владелец расхождён: '$path' — хук приписывает '$hookOwner' (→ $rh), CODEOWNERS приписывает '@$coOwner' (→ $rc)"
+        }
     }
 }
 

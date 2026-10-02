@@ -51,7 +51,12 @@ function Get-Cli {
 }
 
 function New-BuildDir {
-    if (-not (Test-Path -LiteralPath $Script:BuildPath)) {
+    if (Test-Path -LiteralPath $Script:BuildPath) {
+        # Очищаем каталог от стухших артефактов: иначе Get-Firmware может
+        # выбрать .flashed.bin или .merged.bin вместо актуального .ino.bin.
+        Get-ChildItem -LiteralPath $Script:BuildPath -Force |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
         New-Item -ItemType Directory -Path $Script:BuildPath | Out-Null
     }
 }
@@ -60,16 +65,16 @@ function Invoke-Compile {
     param([switch]$Quiet)
     $cli = Get-Cli
     New-BuildDir
-    $args = @(
+    $compileArgs = @(
         'compile'
         '--fqbn', $Script:Fqbn
         '--build-path', $Script:BuildPath
-        '--warnings', 'default'
+        '--warnings', 'all'
     )
-    if ($Quiet) { $args += '--quiet' }
-    $args += $Script:SketchPath
+    if ($Quiet) { $compileArgs += '--quiet' }
+    $compileArgs += $Script:SketchPath
     Write-Host "[build] fqbn=$($Script:Fqbn) sketch=$($Script:SketchPath)" -ForegroundColor Cyan
-    & $cli @args
+    & $cli @compileArgs
     if ($LASTEXITCODE -ne 0) { throw "Сборка провалилась (код $LASTEXITCODE)" }
     Write-Host "[build] OK" -ForegroundColor Green
 }
@@ -77,28 +82,48 @@ function Invoke-Compile {
 function Get-EsptoolPath {
     $pkgs = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools\esptool_py'
     if (-not (Test-Path -LiteralPath $pkgs)) { throw "esptool_py не найден: $pkgs" }
+    # Сортируем по версии через [version], а не лексикографически:
+    # 4.9.0 > 4.10.0 строково, но 4.10.0 > 4.9.0 численно.
+    $vsort = {
+        if ($_.FullName -match '\\(\d+\.\d+(?:\.\d+)?)\\') {
+            try { [version]$Matches[1] } catch { [version]'0' }
+        } else { [version]'0' }
+    }
     $exe = Get-ChildItem -LiteralPath $pkgs -Recurse -Filter 'esptool.exe' -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if ($exe) { return $exe.FullName }
+        Sort-Object $vsort -Descending | Select-Object -First 1
+    if ($exe) { return @{ Path = $exe.FullName; Interpreter = $null } }
+    # esptool.py — исполняемый как скрипт через python, а не напрямую.
     $py = Get-ChildItem -LiteralPath $pkgs -Recurse -Filter 'esptool.py' -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if ($py) { return $py.FullName }
+        Sort-Object $vsort -Descending | Select-Object -First 1
+    if ($py) {
+        $python = Get-Command 'python' -ErrorAction SilentlyContinue
+        if (-not $python) { $python = Get-Command 'py' -ErrorAction SilentlyContinue }
+        if (-not $python) { $python = Get-Command 'python3' -ErrorAction SilentlyContinue }
+        if (-not $python) { throw "esptool.py найден, но python не установлен" }
+        return @{ Path = $py.FullName; Interpreter = $python.Source }
+    }
     throw "esptool не найден в $pkgs"
 }
 
 function Get-Firmware {
-    $bin = Get-ChildItem -LiteralPath $Script:BuildPath -Filter "$($Script:SketchName).*.bin" -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notmatch '^(boot_app0|partitions|bootloader)' } |
-        Select-Object -First 1
-    if (-not $bin) { throw "Не найден артефакт прошивки в $($Script:BuildPath)" }
-    return $bin.FullName
+    # Строгий выбор: ищем ровно $SketchName.ino.bin. Раньше использовался
+    # Select-Object -First 1 по порядку ФС, и попадал .flashed.bin или
+    # .merged.bin — префикс у них ESP32_BiAmp.ino.*, а не boot_app0.
+    $expectedPath = Join-Path $Script:BuildPath "$($Script:SketchName).ino.bin"
+    if (-not (Test-Path -LiteralPath $expectedPath)) {
+        throw "Не найден артефакт прошивки: $expectedPath. Ожидался ровно один файл $("$($Script:SketchName).ino.bin")"
+    }
+    return $expectedPath
 }
 
 function Wait-ForPort {
     param([int]$TimeoutSec = 20)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    # Строгий матч: Select-String -SimpleMatch COM1 поймает и COM10, COM14.
+    # Используем regex с \b — граница слова не даст совпасть COM1 с COM10.
+    $escapedPort = [regex]::Escape($Script:Port)
     while ((Get-Date) -lt $deadline) {
-        $found = & (Get-Cli) board list 2>$null | Select-String -SimpleMatch $Script:Port
+        $found = & (Get-Cli) board list 2>$null | Select-String -Pattern "\b$escapedPort\b"
         if ($found) { return $true }
         Start-Sleep -Milliseconds 1500
     }
