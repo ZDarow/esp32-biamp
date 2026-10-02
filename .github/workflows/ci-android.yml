@@ -38,8 +38,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Раньше стояла версия v1: у gradle/actions нет тега v1, action лежит в
+      # подкаталоге setup-gradle, и запуск падал на разборе action.yml до
+      # начала сборки. Актуальная мажорная версия — v4.
       - name: Установка Gradle
-        uses: gradle/actions/setup-gradle@v1
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Указание пути к Android SDK
         run: |
