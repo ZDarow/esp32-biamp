@@ -100,7 +100,12 @@ android {
 kotlin { jvmToolchain(17) }
 
 dependencies {
-    // BOM 2025.09.00 — последняя версия compose-bom, приносящая Material3 1.4.0 (стабильный)
+    // BOM 2025.09.00 — проверено `gradlew :app:dependencies`: приносит
+    // material3 **1.3.2**, а не 1.4.0. Это важно для UI: stateful-слайдер
+    // `Slider(state = …)` и `rememberSliderState` появились в 1.4.0, здесь их
+    // нет, и для собственной формы ручки приходится брать перегрузку
+    // `Slider(value = …, thumb = …, track = …)` под @OptIn. Повышение BOM
+    // до версии с material3 1.4.0 снимет этот @OptIn.
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")

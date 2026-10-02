@@ -22,15 +22,20 @@
  */
 package com.kilo.biampcontrol.ui
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 
 /**
  * Добавляет слайдеру accessibility-семантику: объединяет дочерние узлы,
@@ -45,25 +50,46 @@ internal fun Modifier.semanticsMerge(name: String?, state: String?): Modifier =
     }
 
 /**
- * Компактный слайдер: трек 28 dp, зона касания расширена до 48 dp
- * (требование доступности WCAG 2.5.5 / Material: минимальная цель касания 48 dp)
- * за счёт `minimumInteractiveComponentSize()` — стандартного механизма Compose:
- * он центрирует компонент внутри невидимого 48-dp окна и **уменьшает** занятую
- * высоту до 28 dp, если родительский контейнер задан меньше (Row/Column с
- * height(28.dp)). В отличие от height+отрицательного padding этот способ
- * легален: Compose запрещает отрицательный padding.
+ * Высота ручки ползунка: 28 dp при видимой ширине 4 dp.
+ *
+ * Раньше ползунок рисовался дефолтом — кругом 20 dp, — и выглядел как
+ * переключатель, а не как фейдер. Узкая вертикальная ручка со скруглёнными
+ * торцами читается как ход резистора и даёт ту же площадь захвата пальцем,
+ * что и круг, при меньшем визуальном весе.
+ */
+private val ThumbSize = DpSize(4.dp, 28.dp)
+
+/**
+ * Компактный слайдер: трек 16 dp, ручка 4×28 dp, зона касания 48 dp.
+ *
+ * Зона касания расширена до 48 dp (WCAG 2.5.5 / Material: минимальная цель
+ * касания 48 dp) за счёт `minimumInteractiveComponentSize()` — стандартного
+ * механизма Compose: он центрирует компонент внутри невидимого 48-dp окна и
+ * **уменьшает** занятую высоту до 28 dp, если родительский контейнер задан
+ * меньше (`Row` с `height(28.dp)`). В отличие от `height` с отрицательным
+ * отступом этот способ легален: Compose запрещает отрицательный padding.
  * Зазор между ползунком и краями/соседними элементами — 8 dp.
  * Тап по треку — установка значения, перетаскивание — плавное изменение.
- * Основан на стандартном Material3 Slider с уменьшенной высотой.
  *
- * Собственного состояния здесь нет намеренно: значение приходит сверху, и
- * раньше ползунок держал ещё одну копию в `mutableFloatStateOf` с
- * `LaunchedEffect` поверх копии вызывающего. Три зеркала одного числа в
- * цепочке `deviceState → state → pos` означали, что правка ползунка
- * доезжала до отправки через две асинхронные ступени, а `Slider` получал
- * значение, отстающее от того, что нарисовал. Теперь единственная точка
- * состояния — у вызывающего, а этот компонент её только отображает.
+ * Используется перегрузка `Slider(value = …, thumb = …, track = …)`: в
+ * Compose Material 3 1.3.2 (единственная версия, которую приносит BOM
+ * 2025.09.00) устаревшей помечена перегрузка без слотов `thumb`/`track`, а
+ * stateful-вариант `Slider(state = …)` появится только в 1.4.0 вместе с
+ * `rememberSliderState`. Эта перегрузка помечена `@ExperimentalMaterial3Api`,
+ * поэтому ниже стоит `@OptIn`; снимать его имеет смысл вместе с переходом
+ * на 1.4.0. Слоты нужны ради собственной формы ручки: дефолтная — круг 20 dp,
+ * и ползунок выглядит переключателем, а не фейдером.
+ *
+ * Источник истины — вызывающий: значение приходит сверху и уходит вниз
+ * прежним порядком, а `thumb`/`track` только рисуют. Поэтому ответ усилителя,
+ * подтвердивший правку, всегда побеждает локальное положение, и ползунок не
+ * залипает на неотправленном значении.
+ *
+ * Цвета взяты из ролей темы: неактивный трек — `surfaceContainerHighest`,
+ * а не устаревшая `surfaceVariant`, значение которой Compose подставляет из
+ * базовой схемы и потому оно не совпадает с соседними карточками.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun CompactSlider(
     value: Float,
@@ -76,6 +102,18 @@ fun CompactSlider(
     stateDescriptionText: String? = null,
     modifier: Modifier = Modifier
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val colors = SliderDefaults.colors(
+        thumbColor = MaterialTheme.colorScheme.primary,
+        activeTrackColor = MaterialTheme.colorScheme.primary,
+        activeTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        disabledActiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f),
+        disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    )
+
     Slider(
         value = value,
         onValueChange = onValueChange,
@@ -83,14 +121,19 @@ fun CompactSlider(
         valueRange = valueRange,
         steps = steps,
         enabled = enabled,
+        colors = colors,
+        interactionSource = interactionSource,
+        thumb = {
+            SliderDefaults.Thumb(
+                interactionSource = interactionSource,
+                colors = colors,
+                enabled = enabled,
+                thumbSize = ThumbSize
+            )
+        },
         modifier = modifier
             .padding(horizontal = 8.dp) // зазор между ползунком и краями/соседними элементами
             .minimumInteractiveComponentSize() // зона касания 48 dp при видимых 28 dp
-            .semanticsMerge(contentDescription, stateDescriptionText),
-        colors = SliderDefaults.colors(
-            thumbColor = MaterialTheme.colorScheme.primary,
-            activeTrackColor = MaterialTheme.colorScheme.primary,
-            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            .semanticsMerge(contentDescription, stateDescriptionText)
     )
 }

@@ -101,7 +101,7 @@ fun Dial(
     var sidePx by remember { mutableIntStateOf(0) }
 
     val haptics = LocalHapticFeedback.current
-    val track = MaterialTheme.colorScheme.surfaceVariant
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
     val arc = MaterialTheme.colorScheme.primary
     val needle = if (enabled) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.outline
