@@ -57,8 +57,14 @@
     <string name="service_title">Сервис</string>
     <string name="section_speaker_test">Тест динамиков</string>
     <string name="test_all">Все</string>
+    <string name="test_left">Зона Л</string>
+    <string name="test_right">Зона П</string>
     <string name="test_low">НЧ</string>
     <string name="test_high">ВЧ</string>
+    <string name="test_ch1">канал 1</string>
+    <string name="test_ch2">канал 2</string>
+    <string name="test_ch3">канал 3</string>
+    <string name="test_ch4">канал 4</string>
     <string name="test_anti">Анти</string>
     <string name="test_sweep">Свип</string>
     <string name="test_off">СТОП</string>

@@ -54,8 +54,14 @@
     <string name="service_title">Service</string>
     <string name="section_speaker_test">Speaker test</string>
     <string name="test_all">All</string>
+    <string name="test_left">Zone L</string>
+    <string name="test_right">Zone R</string>
     <string name="test_low">LF</string>
     <string name="test_high">HF</string>
+    <string name="test_ch1">ch 1</string>
+    <string name="test_ch2">ch 2</string>
+    <string name="test_ch3">ch 3</string>
+    <string name="test_ch4">ch 4</string>
     <string name="test_anti">Anti</string>
     <string name="test_sweep">Sweep</string>
     <string name="test_off">STOP</string>
