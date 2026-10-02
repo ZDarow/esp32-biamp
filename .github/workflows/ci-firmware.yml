@@ -17,7 +17,7 @@ permissions:
 
 # Версии инструментов зафиксированы: сборка вчера и сборка через месяц
 # должны давать один и тот же образ. Значения соответствуют локальной
-# рабочей сборке v34 и проверяются по тегам и хешам, а не «latest».
+# рабочей сборке v35 и проверяются по тегам и хешам, а не «latest».
 # Файл принадлежит направлению firmware — см. docs/BRANCHING.md.
 env:
   ARDUINO_CLI_VERSION: '1.5.1'
@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Копирование репозитория
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Установка arduino-cli
         run: |
@@ -88,7 +90,7 @@ jobs:
             "$ARDUINO_DIRECTORIES_USER/libraries/ESP32-A2DP"
           # Версии библиотек из реестра фиксируем явно: без этого arduino-cli
           # ставил бы новейшие и сборка могла бы сломаться по чужому релизу.
-          # Значения соответствуют локальной рабочей сборке v34.
+          # Значения соответствуют локальной рабочей сборке v35.
           arduino-cli lib install "Adafruit GFX Library@1.12.6"
           arduino-cli lib install "Adafruit SSD1306@2.5.17"
 

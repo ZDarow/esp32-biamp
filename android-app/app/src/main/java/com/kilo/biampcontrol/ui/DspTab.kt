@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
+import com.kilo.biampcontrol.bt.Limits
 import kotlin.math.roundToInt
 
 @Composable
@@ -41,6 +42,13 @@ fun DspTab(vm: BiAmpViewModel) {
     val ds by vm.deviceState.collectAsState()
     val connected by vm.connState.collectAsState()
     val enabled = connected == ConnState.CONNECTED
+
+    // Выключенные секции оставляют Fc и HPF в памяти (их нечем менять, пока
+    // фильтры считаются как bypass), поэтому ручки остаются на месте и видимыми —
+    // просто задизейблены. Иначе при выключении секции они бы исчезли, и
+    // вторая ручка съезжала бы с места в горизонтальной линии.
+    val xoEnabled = enabled && ds.xoOn
+    val subEnabled = enabled && ds.subOn
 
     Column(
         modifier = Modifier
@@ -51,7 +59,7 @@ fun DspTab(vm: BiAmpViewModel) {
     ) {
         Text(stringResource(R.string.dsp_title), style = MaterialTheme.typography.titleLarge)
 
-        // ── 1. Кроссовер: общий срез НФ/ВЧ-веток ─────────────────
+        // ── 1. Кроссовер и сабсоник: две крупные ручки в одну линию ──
         Text(stringResource(R.string.xo_title), style = MaterialTheme.typography.titleMedium)
         Caption(stringResource(R.string.xo_caption))
         Row(
@@ -70,24 +78,6 @@ fun DspTab(vm: BiAmpViewModel) {
             }
             Switch(checked = ds.xoOn, onCheckedChange = { vm.setXoOn(it) }, enabled = enabled)
         }
-        // Выключенный кроссовер оставляет значения Fc и типа в памяти
-        // (их нечем менять, пока секции считаются как bypass), поэтому
-        // элементы остаются видимыми — просто недоступными.
-        val xoEnabled = enabled && ds.xoOn
-        LabeledSlider("Fc", ds.fc, 200f..1000f, xoEnabled,
-            stringResource(R.string.suffix_hz), 15) { vm.setFc(it.roundToInt()) }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
-            Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
-        }
-        if (ds.subOn) {
-            LabeledSlider("HPF", ds.hp, 20f..80f, enabled,
-                stringResource(R.string.suffix_hz), 11) { vm.setHp(it.roundToInt()) }
-        }
         Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
@@ -96,6 +86,43 @@ fun DspTab(vm: BiAmpViewModel) {
             FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
                        label = { Text("LR4") }, enabled = xoEnabled,
                        modifier = Modifier.weight(1f))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.weight(1f))
+            Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
+        }
+
+        // Обе частотные ручки стоят в одну горизонталь: их выставляют вместе,
+        // слушая один и тот же фрагмент записи, и вертикальный список заставлял
+        // прокручивать экран между ними. Подписи вынесены под ручки, иначе
+        // подписи наезжали бы друг на друга на узком экране.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.Top
+        ) {
+            DialKnob(
+                label = stringResource(R.string.xo_fc),
+                value = ds.fc,
+                range = 200f..1000f,
+                steps = 15,
+                enabled = xoEnabled,
+                modifier = Modifier.weight(1f)
+            ) { vm.setFc(it.roundToInt()) }
+
+            DialKnob(
+                label = stringResource(R.string.subsonic_knob),
+                value = ds.hp,
+                range = 20f..80f,
+                steps = 11,
+                enabled = subEnabled,
+                modifier = Modifier.weight(1f)
+            ) { vm.setHp(it.roundToInt()) }
         }
 
         HorizontalDivider()
@@ -113,25 +140,84 @@ fun DspTab(vm: BiAmpViewModel) {
         Caption(stringResource(R.string.band_caption))
         FilterGraph(vm, ds, enabled)
 
-        HorizontalDivider()
+HorizontalDivider()
 
-        // ── 5. Инверсия фазы ─────────────────────────────────────
-        Text(stringResource(R.string.phase_inversion), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CHANNEL_NAME_RES.forEachIndexed { ch, res ->
-                FilterChip(
-                    selected = ds.inv.getOrElse(ch) { false },
-                    onClick = { vm.toggleInv(ch) },
-                    label = { Text(stringResource(res)) },
-                    enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+        // ── 5. Раскладка выходов: L/R и дублирование 2,3 ──────────
+        // Предупреждение о DUP обязано быть на экране: при DUP: 1 каналы
+        // 2 и 3 физически молчат, и без этой строки пользователь ищет
+        // неисправность в усилителе, а не в настройке.
+        if (ds.dup) {
+            Text(
+                stringResource(R.string.dup_warning),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
         }
-        OutlinedButton(onClick = { vm.invOff() }, enabled = enabled,
-                       modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.reset_inversion)) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.weight(1f))
+            Switch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it) }, enabled = enabled)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.weight(1f))
+            Switch(checked = ds.dup, onCheckedChange = { vm.setDup(it) }, enabled = enabled)
+        }
 
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Ручка с подписью и текущим значением для горизонтальной линии.
+ *
+ * Подпись и число стоят под крутилкой, а не рядом: на две ручки в ряд ширины
+ * не хватает, и подпись сбоку выдавила бы вторую ручку за край экрана.
+ * Число набрано покрупнее подписи — на него смотрят, выставляя частоту.
+ */
+@Composable
+private fun DialKnob(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onFinished: (Float) -> Unit
+) {
+    val stateText = sliderStateText(value, steps, " Гц")
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Dial(
+            value = value,
+            valueRange = range,
+            onValueChangeFinished = onFinished,
+            enabled = enabled,
+            steps = steps,
+            diameter = 132.dp,
+            label = label,
+            stateText = stateText
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            stateText,
+            style = MaterialTheme.typography.titleLarge,
+            color = if (enabled) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline
+        )
     }
 }
 
@@ -146,12 +232,20 @@ private fun Caption(text: String) {
 }
 
 // ── Полоса EQ: кнопка «0» в строке заголовка, слайдер отдельно ──
+/**
+ * Одна копия значения полосы: `pos`. Подтверждается значением с устройства
+ * через [LaunchedEffect] и передаётся в [CompactSlider] как есть — у ползунка
+ * своего состояния больше нет.
+ */
 @Composable
 private fun EqRow(label: String, value: Float, enabled: Boolean,
                   onReset: () -> Unit, onFinished: (Float) -> Unit) {
-    var pos by remember { mutableFloatStateOf(value) }
-    LaunchedEffect(value) { pos = value }
-    val stateText = "${pos.roundToInt()} дБ"
+    val pos = remember { mutableFloatStateOf(value) }
+    // floatValue вместо value: mutableFloatStateOf хранит Float в примитиве,
+    // и обращение через value упаковывало бы его в Float на каждом кадре
+    // (lint AutoboxingStateValueProperty).
+    LaunchedEffect(value) { pos.floatValue = value }
+    val stateText = "${pos.floatValue.roundToInt()} дБ"
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -172,9 +266,9 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
     // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
     Row(Modifier.fillMaxWidth().height(28.dp)) {
         CompactSlider(
-            value = pos, onValueChange = { pos = it },
-            onValueChangeFinished = { onFinished(pos) },
-            valueRange = -12f..12f, steps = 23, enabled = enabled,
+            value = pos.floatValue, onValueChange = { pos.floatValue = it },
+            onValueChangeFinished = { onFinished(pos.floatValue) },
+            valueRange = Limits.EQ_MIN..Limits.EQ_MAX, steps = 23, enabled = enabled,
             contentDescription = label,
             stateDescriptionText = stateText,
             modifier = Modifier.fillMaxWidth()

@@ -316,24 +316,6 @@ private fun DrawScope.drawDbGrid(
 }
 
 /**
- * Идентификаторы имён четырёх каналов усилителя в порядке индексов ch_hp/ch_lp
- * (ESP32_BiAmp.ino:101: `Z1: LEFT_HF, LEFT_LF`, `Z2: RIGHT_HF, RIGHT_LF`).
- *
- * Единственный источник правды: список используют задержки и инверсия фазы.
- * Дублировать его опасно — рассинхрон по порядку сразу даст неверный канал
- * в командах chhp/chlp/delay/inv.
- *
- * Хранятся идентификаторы ресурсов, а не готовые строки: иначе подписи
- * каналов остались бы единственным непереводимым текстом в приложении.
- */
-val CHANNEL_NAME_RES = listOf(
-    R.string.channel_lf,
-    R.string.channel_hf_l,
-    R.string.channel_lf_r,
-    R.string.channel_hf_r
-)
-
-/**
  * Полоса акустической системы: пара каналов стерео (левый и правый динамик
  * одной полосы) плюс её название для заголовка.
  *
@@ -535,10 +517,6 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
                 val v = levelSteps(levelStep.pos + 1f)
                 levelStep.set(v)
                 band.setLevel(vm, v)
-            },
-            onReset = {
-                levelStep.set(0f)
-                band.setLevel(vm, 0f)
             }
         )
 
@@ -550,20 +528,9 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             )
         }
 
-        // Фаза: прошивка даёт только инверсию знака inv:C, 0 или 180°.
-        val inverted = ds.inv.getOrElse(band.chLeft) { false } ||
-            ds.inv.getOrElse(band.chRight) { false }
-        StepperRow(
-            label = stringResource(R.string.stepper_phase),
-            valueText = stringResource(
-                if (inverted) R.string.phase_180 else R.string.phase_0
-            ),
-            enabled = enabled,
-            onPrev = null,
-            onNext = null,
-            onReset = { band.channels.forEach { vm.toggleInv(it) } }
-        )
-
+// Фазы у полосы больше нет: инверсию знака убрали из прошивки в v35.
+        // Настройку сдвига сторон делает перестановка Л/П в блоке DSP —
+        // она общая для полосы, а не отдельная настройка каждой.
         Text(
             stringResource(R.string.slope_note),
             style = MaterialTheme.typography.bodySmall,
@@ -646,8 +613,8 @@ internal fun freqValueText(hz: Int, off: String, hzUnit: String, kHzUnit: String
 
 /**
  * Строка параметра в стиле спеки: метка слева, кнопки «<» и «>» по краям
- * серого поля значения. Кнопки шагают по ступеням [FILTER_STEPS];
- * [onReset] вместо шага включается для нечисловых параметров (фаза).
+ * серого поля значения. Кнопки шагают по ступеням [FILTER_STEPS]:
+ * нижняя ступень первого фильтра — ноль, то есть «выключено».
  */
 @Composable
 private fun StepperRow(
@@ -677,8 +644,7 @@ private fun StepperRow(
             val i = FILTER_STEPS.indexOf(cur)
             onStep(FILTER_STEPS[(i + 1).coerceAtMost(FILTER_STEPS.size - 1)])
         }
-    },
-    onReset = { onStep(0) }
+    }
 )
 
 @Composable
@@ -686,9 +652,8 @@ private fun StepperRow(
     label: String,
     valueText: String,
     enabled: Boolean,
-    onPrev: (() -> Unit)?,
-    onNext: (() -> Unit)?,
-    onReset: () -> Unit
+    onPrev: () -> Unit,
+    onNext: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -701,13 +666,11 @@ private fun StepperRow(
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.weight(1f)
         )
-        if (onPrev != null) {
-            TextButton(
-                onClick = onPrev,
-                enabled = enabled,
-                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_dec, label), null)
-            ) { Text("<", style = MaterialTheme.typography.titleLarge) }
-        }
+        TextButton(
+            onClick = onPrev,
+            enabled = enabled,
+            modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_dec, label), null)
+        ) { Text("<", style = MaterialTheme.typography.titleLarge) }
         Surface(
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f),
             shape = MaterialTheme.shapes.extraSmall,
@@ -722,20 +685,11 @@ private fun StepperRow(
                 modifier = Modifier.fillMaxWidth()
             )
         }
-        if (onNext != null) {
-            TextButton(
-                onClick = onNext,
-                enabled = enabled,
-                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_inc, label), null)
-            ) { Text(">", style = MaterialTheme.typography.titleLarge) }
-        } else {
-            // Для параметра без шага (фаза) правая кнопка меняет значение.
-            TextButton(
-                onClick = onReset,
-                enabled = enabled,
-                modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_toggle, label), null)
-            ) { Text("⇄", style = MaterialTheme.typography.titleLarge) }
-        }
+        TextButton(
+            onClick = onNext,
+            enabled = enabled,
+            modifier = Modifier.semanticsMerge(stringResource(R.string.stepper_inc, label), null)
+        ) { Text(">", style = MaterialTheme.typography.titleLarge) }
     }
 }
 

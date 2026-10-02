@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.PowerOff
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,15 +53,25 @@ import com.kilo.biampcontrol.bt.ConnState
 import com.kilo.biampcontrol.ui.DspTab
 import com.kilo.biampcontrol.ui.ServiceTab
 import com.kilo.biampcontrol.ui.VolumeTab
+import com.kilo.biampcontrol.ui.semanticsMerge
 import com.kilo.biampcontrol.ui.theme.BiAmpTheme
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Запрашиваемые разрешения.
+     *
+     * Список обязан совпадать с манифестом: там объявлены и COARSE, и FINE
+     * для Android 11 и ниже, потому что обеда до Android 12 требовала
+     * оба. Запрашивая только FINE, приложение оставляло объявленное
+     * COARSE неиспользованным, а пользователю — лишний диалог.
+     */
     private val btPermissions: Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
         else
             arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION)
 
     private val permLauncher =
@@ -99,15 +111,37 @@ class MainActivity : ComponentActivity() {
 
 data class TabItem(val title: String, val icon: ImageVector)
 
+/**
+ * Цвет значка подключения.
+ *
+ * Отдельная функция, а не `when` внутри композа: цвет — часть состояния,
+ * и его удобно проверять тестом вместе с самим состоянием соединения.
+ */
+internal fun connColor(state: ConnState): Color = when (state) {
+    ConnState.CONNECTED -> Color(0xFF4CAF50)
+    ConnState.CONNECTING, ConnState.RECONNECTING -> Color(0xFFFFC107)
+    ConnState.DISCONNECTED -> Color(0xFFF44336)
+}
+
 @SuppressLint("MissingPermission")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: BiAmpViewModel) {
-    val connState by vm.connState.collectAsState()
+val connState by vm.connState.collectAsState()
     val devices by vm.devices.collectAsState()
     val ctx = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var showDevicePicker by remember { mutableStateOf(false) }
+
+    // Описание состояния для TalkBack: у иконки contentDescription пустой
+    // (иначе она прочитается дважды — имя кнопки и имя иконки), поэтому
+    // состояние сообщается отдельным полем.
+    val connStateText = when (connState) {
+        ConnState.CONNECTED -> stringResource(R.string.conn_state_on)
+        ConnState.CONNECTING -> stringResource(R.string.conn_state_connecting)
+        ConnState.RECONNECTING -> stringResource(R.string.conn_state_reconnecting)
+        ConnState.DISCONNECTED -> stringResource(R.string.conn_state_off)
+    }
 
 val tabs = listOf(
         TabItem(stringResource(R.string.tab_volume), Icons.Default.GraphicEq),
@@ -125,42 +159,34 @@ val tabs = listOf(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
-                    val color = when (connState) {
-                        ConnState.CONNECTED -> Color(0xFF4CAF50)
-                        ConnState.CONNECTING, ConnState.RECONNECTING -> Color(0xFFFFC107)
-                        ConnState.DISCONNECTED -> Color(0xFFF44336)
-                    }
-                    val label = when (connState) {
-                        ConnState.CONNECTED -> "ON"
-                        ConnState.CONNECTING -> "..."
-                        ConnState.RECONNECTING -> "RE"
-                        ConnState.DISCONNECTED -> "OFF"
-                    }
-                    Surface(
-                        color = color,
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Text(
-                            label,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelMedium
+                    // Одна кнопка на всё: сам факт нажатия и цвет значка
+                    // показывают состояние. Отдельные «Подкл.»/«Откл.» рядом
+                    // с индикатором дублировали то же самое текстом.
+                    IconButton(
+                        onClick = {
+                            if (connState == ConnState.CONNECTED ||
+                                connState == ConnState.RECONNECTING
+                            ) {
+                                vm.disconnect()
+                            } else {
+                                vm.refreshDevices(ctx)
+                                showDevicePicker = true
+                            }
+                        },
+                        modifier = Modifier.semanticsMerge(
+                            stringResource(R.string.conn_toggle_cd),
+                            connStateText
                         )
-                    }
-
-                    if (connState == ConnState.CONNECTED || connState == ConnState.RECONNECTING) {
-                        TextButton(onClick = { vm.disconnect() }) {
-                            Text(stringResource(R.string.action_disconnect), color = MaterialTheme.colorScheme.error)
-                        }
-                    } else {
-                        TextButton(onClick = {
-                            vm.refreshDevices(ctx)
-                            showDevicePicker = true
-                        }) { Text(stringResource(R.string.action_connect)) }
+                    ) {
+                        Icon(
+                            imageVector = if (connState == ConnState.CONNECTED)
+                                Icons.Default.PowerSettingsNew else Icons.Default.PowerOff,
+                            contentDescription = null,
+                            tint = connColor(connState)
+                        )
                     }
                 }
             )

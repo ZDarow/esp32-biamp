@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
+import com.kilo.biampcontrol.bt.Limits
 import java.nio.charset.StandardCharsets
 import kotlin.math.roundToInt
 
@@ -99,15 +100,16 @@ Text(stringResource(R.string.service_title), style = MaterialTheme.typography.ti
             ) { Text("TF") }
         }
 
-        // Громкость тест-сигнала. Заводская 6 % — намеренно тихо, чтобы свип
-        // и анти-фаза не били по ушам без присмотра.
+        // Громкость тест-сигнала. Заводские 6 % — намеренно тихо, чтобы свип
+        // и анти-фаза не били по ушам без присмотра, и потолок здесь не 100 %,
+        // а 6 %: TEST_VOL_MAX в прошивке 0.06, а не 1.0 (контракт, раздел 4).
         LabeledSlider(
             label = stringResource(R.string.label_test_volume),
             value = ds.testVol.toFloat(),
-            range = 0f..100f,
+            range = Limits.TEST_VOL_MIN.toFloat()..Limits.TEST_VOL_MAX.toFloat(),
             enabled = enabled,
             suffix = "%",
-            steps = 0
+            steps = 5
         ) { vm.setTestVol(it.roundToInt()) }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -124,10 +126,14 @@ Text(stringResource(R.string.service_title), style = MaterialTheme.typography.ti
                 }
                 Text("V0=${ds.vol0}% V1=${ds.vol1}% bal=${ds.bal}")
                 Text("Fc=${ds.fc.toInt()}Hz hp=${ds.hp.toInt()}Hz sub=${if (ds.subOn) "ON" else "OFF"}")
-                Text("XO: ${if (ds.xoType == 2) "LR4" else "Butter"}")
+                Text("XO: ${if (ds.xoType == 2) "LR4" else "Butter"} ${if (ds.xoOn) "ON" else "OFF"}")
                 Text("TLF=${ds.tlf}dB THF=${ds.thf}dB")
                 Text("EQ: ${ds.eql}/${ds.eqm}/${ds.eqh}")
-                Text("INV: ${ds.inv.map { if (it) 1 else 0 }.joinToString("")}")
+// Строки контракта, раздела 2: Mute, SWP, DUP. Инверсии фазы
+                // в v35 нет — команда inv: удалена, поле INV: тоже.
+                Text("Mute: ${ds.muted[0]}/${ds.muted[1]}")
+                Text("SWP: ${if (ds.swapped) 1 else 0}")
+                Text("DUP: ${if (ds.dup) 1 else 0}")
                 Text("BT: ${if (ds.btAudioOn) "ON" else "OFF"} | SPP: ${if (ds.sppOn) "ON" else "OFF"}")
                 Text("Test: ${ds.testMode} TVol=${ds.testVol}%")
                 Text("Delay: ${ds.delays.joinToString("/")}")

@@ -3,7 +3,7 @@
  *
  * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
  * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Формат команд и ответов — в firmware/protocol/status-contract.md, раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -22,13 +22,22 @@
  */
 package com.kilo.biampcontrol.bt
 
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Очередь команд с троттлингом: «ползунковые» команды идут не чаще
  * 150 мс на префикс, причём новое значение ВЫТЕСНЯЕТ старое.
  * Остальные команды (транспорт, пресеты, тесты) — немедленно.
+ *
+ * Запись выполняется ОДНИМ циклом. Это не оптимизация, а требование: два
+ * писателя в один сокет перемежали бы байты (`v0` + `bal:` → `v0:4bal:0`),
+ * и прошивка разобрала бы это как команду другого вида. Поэтому очередь
+ * не раздаётся писателям, а цикл ниже — единственный, кто держит
+ * `outputStream`.
  */
 class CommandSender(
     private val spp: SppTransport,
@@ -39,7 +48,21 @@ class CommandSender(
      * часами виртуального времени: иначе проверка 150-миллисекундного окна
      * зависела бы от скорости машины.
      */
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    /**
+     * Диспетчер цикла отправки.
+     *
+     * Раньше цикл шёл на диспетчере вызывающего, то есть на главном потоке
+     * UI: синхронные `write()`/`flush()` в сокет блокировали кадры и вели к
+     * ANR. Диспетчер вынесен параметром, чтобы юнит-тест подставлял
+     * тестовый и не зависел от реальных потоков.
+     */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Журнал потерь. Продлён параметром, чтобы юнит-тесты не упирались в
+     * заглушку `android.util.Log` (в JVM-тестах она бросает «Stub!»).
+     */
+    private val logger: (String) -> Unit = { Log.w(TAG, it) }
 ) {
 
     /**
@@ -65,17 +88,55 @@ class CommandSender(
         "tf:"
     )
 
-    private val immediate = Channel<String>(Channel.UNLIMITED)
+    /**
+     * Ёмкость неотложной очереди.
+     *
+     * Раньше стоял `Channel.UNLIMITED`: при зависшем сокете (а он зависает
+     * при потере связи) очередь росла без предела, пока процесс не умирал
+     * по нехватке памяти. 256 команд — это больше, чем успевает отправить
+     * SPP за секунду, поэтому нормальный режим предел не трогает, а зависший
+     * конец получает явную потерю команд в журнал вместо текущей памяти.
+     */
+    private val immediate = Channel<String>(IMMEDIATE_CAPACITY)
     private val pending = LinkedHashMap<String, String>()
     private var lastBatchAt = 0L
 
+    /** Сколько команд отброшено из-за переполнения очереди. */
+    private val _dropped = MutableStateFlow(0)
+    val dropped: StateFlow<Int> = _dropped
+
     fun send(cmd: String, force: Boolean = false) {
         val prefix = throttlePrefixes.firstOrNull { cmd.startsWith(it) }
-        if (prefix == null || force) immediate.trySend(cmd)
-        else synchronized(pending) { pending[prefix] = cmd }
+        if (prefix == null || force) {
+            if (immediate.trySend(cmd).isFailure) {
+                _dropped.value += 1
+                logger("Очередь команд переполнена ($IMMEDIATE_CAPACITY), команда отброшена: $cmd")
+            }
+        } else synchronized(pending) { pending[prefix] = cmd }
     }
 
-    fun start(): Job = scope.launch {
+    /**
+     * Сброс очередей при смене сессии.
+     *
+     * Значения, накопленные до обрыва, относятся к ПРЕЖНЕМУ устройству: после
+     * реконнекта они ушли бы на новый усилитель — и тот получил бы, например,
+     * чужую громкость. Вызывается при CONNECTED и при DISCONNECTED.
+     *
+     * @return сколько команд было отброшено (для журнала).
+     */
+    fun clearQueues(): Int {
+        var dropped = 0
+        while (immediate.tryReceive().getOrNull() != null) dropped++
+        synchronized(pending) {
+            dropped += pending.size
+            pending.clear()
+        }
+        lastBatchAt = now()
+        if (dropped > 0) logger("Очереди очищены при смене сессии, отброшено команд: $dropped")
+        return dropped
+    }
+
+    fun start(): Job = scope.launch(io) {
         lastBatchAt = now()
         while (isActive) {
             // 1) немедленные команды
@@ -97,8 +158,11 @@ class CommandSender(
         }
     }
 
-    private companion object {
+    companion object {
+        private const val TAG = "CommandSender"
         /** Окно троттлинга «ползунковых» команд. */
         const val THROTTLE_MS = 150L
+        /** Предел неотложной очереди: проверяется юнит-тестом. */
+        const val IMMEDIATE_CAPACITY = 256
     }
 }
