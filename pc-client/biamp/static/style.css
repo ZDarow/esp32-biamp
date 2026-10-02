@@ -117,10 +117,22 @@ td input[type=number] {
   font-size: 14px;
 }
 
+.warn {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: rgba(255,176,32,.14);
+  color: #b06f00;
+  border: 1px solid rgba(255,176,32,.4);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f4f6fa; --panel: #fff; --line: #e2e6ee;
     --text: #1a1d26; --muted: #616a80;
   }
   select, button, td input[type=number] { background: #f7f9fc; }
+  .warn { color: #8a5600; }
 }

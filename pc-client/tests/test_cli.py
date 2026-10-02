@@ -12,13 +12,15 @@ def status_block(vol0: int = 42, vol1: int = 38, balance: float = 1.5) -> str:
     return (
         f"V0={vol0}% V1={vol1}% bal={balance:.2f}\r\n"
         "Fc=500Hz hp=45Hz sub=ON\r\n"
-        "XO: LR4\r\n"
+        "XO: LR4 ON\r\n"
         "TLF=-2.00dB THF=1.00dB\r\n"
         "EQ: L=2.00 M=-1.50 H=0.00\r\n"
-        "INV: 1000\r\n"
+        "Mute: 1/0\r\n"
+        "SWP: 1\r\n"
+        "DUP: 0\r\n"
         "BT: ON | SPP: ON\r\n"
         "Src: 48 kHz\r\n"
-        "Test: 0 TVol=6%\r\n"
+        "Test: 0 TVol=5%\r\n"
         "CHF: 80/0 0/10000 0/0 0/0\r\n"
         "Delay: 0/0/3/0\r\n"
     )
@@ -103,10 +105,35 @@ class CliTests(unittest.TestCase):
     def test_set_rejects_bad_value(self):
         self.assertEqual(self._run("set", "crossover", "50"), 2)
 
+    def test_set_boolean_accepts_words(self):
+        """`set sub false` обязан дать sub:0, а не traceback."""
+        self.assertEqual(self._run("set", "sub", "false"), 0)
+        self.assertIn("sub:0", self.device.received)
+        self.assertEqual(self._run("set", "sub", "on"), 0)
+        self.assertIn("sub:1", self.device.received)
+
+    def test_set_boolean_rejects_garbage(self):
+        self.assertEqual(self._run("set", "sub", "возможно"), 2)
+
+    def test_set_mute_is_absolute(self):
+        self.assertEqual(self._run("set", "mute1", "true"), 0)
+        self.assertIn("mute:1:1", self.device.received)
+
+    def test_set_test_volume_range(self):
+        self.assertEqual(self._run("set", "test_volume", "50"), 2)
+
+    def test_bad_port_rejected_without_traceback(self):
+        self.assertEqual(cli.main(["--port", "tcp://127.0.0.1:abc", "status"]), 2)
+
+    def test_traversal_in_profile_name_rejected(self):
+        self.assertEqual(cli.main(["--port", self.target, "load", "../escape"]), 2)
+
     def test_raw_command(self):
         self.assertEqual(self._run("raw", "status"), 0)
 
-    def test_profile_roundtrip(self, ):
+    def test_profile_roundtrip(
+        self,
+    ):
         import io
         import tempfile
         from contextlib import redirect_stdout
