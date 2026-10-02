@@ -81,6 +81,15 @@ class FakeSppClient : SppClient {
     private val _lines = MutableSharedFlow<String>(extraBufferCapacity = 256)
     override val lines: SharedFlow<String> = _lines.asSharedFlow()
 
+    /**
+     * Заглушка всегда сообщает нулевые потери: она ничего не теряет.
+     *
+     * Счётчик нужен ViewModel для журнала, поэтому он есть в контракте
+     * [SppClient], но имитировать переполнение буфера здесь незачем.
+     */
+    private val _droppedLines = MutableStateFlow(0L)
+    override val droppedLines: StateFlow<Long> = _droppedLines.asStateFlow()
+
     override fun connect(dev: BluetoothDevice) {
         connectCalls++
         _state.value = ConnState.CONNECTING

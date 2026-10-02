@@ -3,7 +3,7 @@
  *
  * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
  * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Формат команд и ответов — в firmware/protocol/status-contract.md, раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -25,6 +25,7 @@ package com.kilo.biampcontrol.bt
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.BufferedReader
@@ -57,6 +58,16 @@ interface SppTransport {
 interface SppClient : SppTransport {
     val state: StateFlow<ConnState>
     val lines: SharedFlow<String>
+
+    /**
+     * Сколько строк SPP потеряно из-за переполнения буфера [lines].
+     *
+     * Часть контракта соединения, а не деталь реализации: ViewModel читает
+     * счётчик через [SppClient], чтобы показать потерю строк в журнале,
+     * поэтому заглушка в instrumented-тестах обязана его предоставить.
+     */
+    val droppedLines: StateFlow<Long>
+
     fun connect(dev: BluetoothDevice)
     fun disconnect()
 }
@@ -67,8 +78,21 @@ interface SppClient : SppTransport {
 class SppManager(private val scope: CoroutineScope) : SppClient {
 
     companion object {
+        private const val TAG = "SppManager"
         val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         private val RETRY_DELAYS = longArrayOf(2_000, 4_000, 8_000, 15_000, 30_000)
+
+        /** Реальный предел ожидания `socket.connect()`. */
+        const val CONNECT_TIMEOUT_MS = 15_000L
+
+        /**
+         * Предел длины строки ответа.
+         *
+         * Строка `status` — это несколько десятков символов. Всё, что длиннее,
+         * либо мусор, либо залипший поток без переводов строк; без предела он
+         * копился бы в `StringBuilder` до нехватки памяти.
+         */
+        const val MAX_LINE_CHARS = 512
     }
 
     private val _state = MutableStateFlow(ConnState.DISCONNECTED)
@@ -76,6 +100,17 @@ class SppManager(private val scope: CoroutineScope) : SppClient {
 
     private val _lines = MutableSharedFlow<String>(extraBufferCapacity = 64)
     override val lines: SharedFlow<String> = _lines
+
+    /**
+     * Сколько строк SPP потеряно из-за переполнения буфера [_lines].
+     *
+     * `tryEmit` при заполненном буфере возвращает `false`, и раньше этот
+     * результат просто игнорировался: терялась строка `Delay:` — то есть
+     * блок `status` не замыкался, состояние «залипало» на старом, а ползунки
+     * не возвращались к реальным значениям. Счётчик показывается в журнале.
+     */
+    private val _droppedLines = MutableStateFlow(0L)
+    override val droppedLines: StateFlow<Long> = _droppedLines
 
     /**
      * Всё состояние соединения живёт под [lock], а [generation] — номер
@@ -111,11 +146,19 @@ class SppManager(private val scope: CoroutineScope) : SppClient {
         _state.value = ConnState.DISCONNECTED
     }
 
+    /**
+     * Отправка команды: санитайзер, затем запись в сокет.
+     *
+     * Строка очищается от символов вне `[A-Za-z0-9:_.-]` и обрезается до
+     * [Limits.CMD_MAX_CHARS]. Прошивка исполняет присланную строку как команду,
+     * поэтому встроенный перевод строки отправил бы сразу несколько команд.
+     */
     override fun sendLine(cmd: String) {
+        val line = CommandSanitizer.sanitize(cmd) ?: return
         val s = synchronized(lock) { socket } ?: return
         try {
             s.outputStream.apply {
-                write((cmd + "\n").toByteArray())
+                write((line + "\n").toByteArray(Charsets.UTF_8))
                 flush()
             }
         } catch (_: Exception) {
@@ -134,11 +177,7 @@ class SppManager(private val scope: CoroutineScope) : SppClient {
             _state.value = if (attempt == 0) ConnState.CONNECTING else ConnState.RECONNECTING
             var s: BluetoothSocket? = null
             try {
-                s = withTimeoutOrNull(15_000) {
-                    withContext(Dispatchers.IO) {
-                        dev.createInsecureRfcommSocketToServiceRecord(SPP_UUID).also { it.connect() }
-                    }
-                } ?: throw IOException("connect timeout")
+                s = openSocket(dev, gen)
                 // Пока шёл connect(), пользователь мог нажать «Отключить» или
                 // выбрать другое устройство. Этот сокет уже не нужен: закрываем
                 // молча, не показывая CONNECTED от устройства, от которого
@@ -151,7 +190,13 @@ class SppManager(private val scope: CoroutineScope) : SppClient {
                 _state.value = ConnState.CONNECTED
                 attempt = 0
                 readLoop(s, gen)          // вернётся при обрыве
-            } catch (_: Exception) {
+            } catch (e: CancellationException) {
+                // Отмена — это не «ошибка соединения». Пробрасываем её, иначе
+                // цикл автореконнекта продолжил бы работу после disconnect()
+                // и вернул приложение в CONNECTED без спроса пользователя.
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Попытка соединения не удалась: ${e.message}")
             } finally {
                 // Отпускаем сокет, только если он всё ещё наш: у нового
                 // поколения к этому моменту может быть свой.
@@ -168,11 +213,110 @@ class SppManager(private val scope: CoroutineScope) : SppClient {
         if (isCurrent(gen) && !wantConnection) _state.value = ConnState.DISCONNECTED
     }
 
+    /**
+     * Попытка открыть сокет с РЕАЛЬНЫМ пределом ожидания.
+     *
+     * `withTimeoutOrNull { socket.connect() }` не работает: `connect()` —
+     * блокирующий нативный вызов, и отмена корутины не может прервать его.
+     * Хуже того, отмена такого `withContext` не возвращает управление до
+     * выхода из нативного вызова, то есть «таймаут» просто сдвигал проблему,
+     * а сокет успевал утечь. Здесь вызов уходит в отдельную задачу, а
+     * ожидание идёт по [CompletableDeferred] — это обычное отменяемое
+     * приостановление.
+     *
+     * По истечении предела сокет закрывается прямо из этой функции, что
+     * разблокирует нативный `connect()`, а сама задача, увидев
+     * [ConnectAttempt.abandoned], закрывает его ещё раз и не отдаёт его
+     * никому. Сокет не теряется ни в одном из исходов.
+     */
+    @SuppressLint("MissingPermission")
+    private suspend fun openSocket(dev: BluetoothDevice, gen: Int): BluetoothSocket {
+        val attempt = ConnectAttempt()
+        val ready = CompletableDeferred<BluetoothSocket?>()
+        scope.launch(Dispatchers.IO) {
+            val s = dev.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+            attempt.sock = s
+            if (attempt.abandoned) {
+                closeQuietly(s)
+                ready.complete(null)
+                return@launch
+            }
+            var ok = false
+            try {
+                s.connect()
+                ok = true
+            } catch (e: Exception) {
+                Log.w(TAG, "connect() не удался: ${e.message}")
+            }
+            if (!ok || attempt.abandoned) {
+                // Пользователь успел нажать «Отключить» или предел ожидания
+                // истёк: сокет закрываем здесь и наружу не отдаём.
+                closeQuietly(s)
+                ready.complete(null)
+            } else if (!isCurrent(gen) || !wantConnection) {
+                closeQuietly(s)
+                ready.complete(null)
+            } else {
+                ready.complete(s)
+            }
+        }
+        val s = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { ready.await() }
+        if (s == null) {
+            attempt.abandoned = true
+            // Закрытие здесь — единственный способ прервать зависший connect().
+            closeQuietly(attempt.sock)
+            throw IOException("connect timeout ${CONNECT_TIMEOUT_MS} мс")
+        }
+        return s
+    }
+
+    /** Состояние одной попытки соединения, разделяемое с задачей `connect()`. */
+    private class ConnectAttempt {
+        @Volatile var sock: BluetoothSocket? = null
+        @Volatile var abandoned = false
+    }
+
     private suspend fun readLoop(s: BluetoothSocket, gen: Int) = withContext(Dispatchers.IO) {
-        BufferedReader(InputStreamReader(s.inputStream)).use { r ->
+        BufferedReader(InputStreamReader(s.inputStream, Charsets.UTF_8)).use { r ->
             while (isActive && isCurrent(gen)) {
-                val line = r.readLine() ?: break
-                if (line.isNotBlank()) _lines.tryEmit(line.trim())
+                val (t, skipped) = readLineLimited(r) ?: break
+                if (skipped > 0) {
+                    Log.w(TAG, "Строка длиннее $MAX_LINE_CHARS симв. обрезана, отброшено символов: $skipped")
+                }
+                if (t.isEmpty()) continue
+                if (!_lines.tryEmit(t)) {
+                    // Буфер переполнен: строка потеряна. Молчать об этом
+                    // нельзя — потеря `Delay:` или `V0=` ломает разбор
+                    // статуса и оставляет «залипшие» значения на экране.
+                    _droppedLines.value += 1
+                    Log.w(TAG, "Буфер SPP переполнен, строка отброшена: $t")
+                }
+            }
+        }
+    }
+
+    /**
+     * Чтение строки с пределом длины [MAX_LINE_CHARS].
+     *
+     * `BufferedReader.readLine()` не ограничен: поток без переводов строк
+     * заставил бы его расти до нехватки памяти. Здесь строка обрезается, а
+     * лишнее дочитывается до конца строки: иначе хвост обрезанной строки
+     * был бы прочитан как отдельная «новая» строка.
+     *
+     * @return пара «строка без CR» и «сколько символов отброшено», либо
+     *   `null`, если поток закончился ровно на границе строк.
+     */
+    private fun readLineLimited(r: BufferedReader): Pair<String, Int>? {
+        val sb = StringBuilder()
+        var skipped = 0
+        while (true) {
+            val c = r.read()
+            if (c == -1) return if (sb.isEmpty() && skipped == 0) null else sb.toString() to skipped
+            if (c == '\n'.code) return sb.toString() to skipped
+            if (sb.length < MAX_LINE_CHARS) {
+                if (c != '\r'.code) sb.append(c.toChar())
+            } else {
+                skipped++
             }
         }
     }

@@ -85,13 +85,18 @@ class MainScreenTest {
         "XO: Butter ON",
         "TLF=3.00dB THF=0.00dB",
         "EQ: L=2.00 M=0.00 H=1.00",
+        "Mute: 0/0",
         "SWP: 1",
+        "DUP: 0",
         "BT: ON | SPP: ON",
         "Src: 48.0 kHz",
         "Test: 0 TVol=9%",
         "CHF: 31/3150 0/0 31/3150 0/0",
         "Delay: 0/0/0/0"
     )
+
+    /** Тот же блок, но зона 0 заглушена — ответ усилителя после `mute:0:1`. */
+    private val mutedBlock = statusBlock.map { if (it.startsWith("Mute:")) "Mute: 1/0" else it }
 
     /** Строка из ресурсов: язык устройства в тестах не задаём. */
     private fun str(id: Int): String = app.getString(id)
@@ -169,8 +174,15 @@ class MainScreenTest {
         compose.onNodeWithText(str(R.string.mute_left)).performClick()
         compose.waitForIdle()
 
-        assertEquals(listOf("mute:0"), client.mutes)
-        assertEquals(true, vm.isMuted0.value)
+        // Контракт v35.1: mute — абсолютная установка, а не переключатель.
+        assertEquals(listOf("mute:0:1"), client.mutes)
+        // До ответа усилителя чип обязан остаться в прежнем состоянии:
+        // локальный флаг врал бы между нажатием и подтверждением.
+        assertEquals(false, vm.isMuted(0))
+
+        runBlocking { client.deviceAnswers(*mutedBlock.toTypedArray()) }
+        compose.waitUntil(10_000) { vm.isMuted(0) }
+        assertEquals(true, vm.isMuted(0))
     }
 
     @Test

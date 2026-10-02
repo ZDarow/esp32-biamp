@@ -96,15 +96,11 @@
     <string name="eq_reset_cd">%1$s, reset to 0 dB</string>
     <string name="band_title">Bands — per-band trim</string>
     <string name="band_caption">Extra filters and level for a single band on top of the global crossover. Applied after it, so they can only narrow the band range, never widen it beyond Fc.</string>
-    <string name="lr_swap">L/R swap</string>
+<string name="lr_swap">L/R swap</string>
     <string name="lr_swap_caption">Swaps the amplifier outputs when the left channel comes out of the right speaker. No rewiring needed.</string>
     <string name="lr_switch">Swap channels</string>
 
     <!-- Channel names: order matches ch_hp/ch_lp indices -->
-    <string name="channel_lf">LF-L</string>
-    <string name="channel_hf_l">HF-L</string>
-    <string name="channel_lf_r">LF-R</string>
-    <string name="channel_hf_r">HF-R</string>
     <string name="band_mid">Mid drivers</string>
     <string name="band_high">HF drivers</string>
 
@@ -118,10 +114,14 @@
     <string name="scope_note">The graph and buttons apply to band %1$s only. The global crossover (Fc, subsonic) is not shown here and is applied earlier — see the “Crossover — global split” block.</string>
     <string name="stepper_dec">%1$s, decrease</string>
     <string name="stepper_inc">%1$s, increase</string>
-    <string name="stepper_toggle">%1$s, toggle</string>
     <string name="filter_hz">%1$d Hz</string>
     <string name="filter_khz">kHz</string>
     <string name="filter_disabled">disabled</string>
     <string name="filter_off">off</string>
+
+    <!-- Output layout: SWP/DUP lines of the contract (section 2). -->
+    <string name="swap_switch">Swap L/R</string>
+    <string name="dup_switch">Duplicate to 2, 3</string>
+    <string name="dup_warning">DUP: 1 - channels 2 and 3 are physically silent. Restore</string>
 
 </resources>

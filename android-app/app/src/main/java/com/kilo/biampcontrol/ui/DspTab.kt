@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
+import com.kilo.biampcontrol.bt.Limits
 import kotlin.math.roundToInt
 
 @Composable
@@ -139,25 +140,34 @@ fun DspTab(vm: BiAmpViewModel) {
         Caption(stringResource(R.string.band_caption))
         FilterGraph(vm, ds, enabled)
 
-        HorizontalDivider()
+HorizontalDivider()
 
-        // ── 5. Перестановка выходов Л/П ─────────────────────────────
-        Text(stringResource(R.string.lr_swap), style = MaterialTheme.typography.titleMedium)
-        Caption(stringResource(R.string.lr_swap_caption))
+        // ── 5. Раскладка выходов: L/R и дублирование 2,3 ──────────
+        // Предупреждение о DUP обязано быть на экране: при DUP: 1 каналы
+        // 2 и 3 физически молчат, и без этой строки пользователь ищет
+        // неисправность в усилителе, а не в настройке.
+        if (ds.dup) {
+            Text(
+                stringResource(R.string.dup_warning),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                stringResource(R.string.lr_switch),
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f)
-            )
-            Switch(
-                checked = ds.lrSwap,
-                onCheckedChange = { vm.setLrSwap(it) },
-                enabled = enabled
-            )
+Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.weight(1f))
+            Switch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it) }, enabled = enabled)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.weight(1f))
+            Switch(checked = ds.dup, onCheckedChange = { vm.setDup(it) }, enabled = enabled)
         }
 
         Spacer(Modifier.height(8.dp))
@@ -222,12 +232,20 @@ private fun Caption(text: String) {
 }
 
 // ── Полоса EQ: кнопка «0» в строке заголовка, слайдер отдельно ──
+/**
+ * Одна копия значения полосы: `pos`. Подтверждается значением с устройства
+ * через [LaunchedEffect] и передаётся в [CompactSlider] как есть — у ползунка
+ * своего состояния больше нет.
+ */
 @Composable
 private fun EqRow(label: String, value: Float, enabled: Boolean,
                   onReset: () -> Unit, onFinished: (Float) -> Unit) {
-    var pos by remember { mutableFloatStateOf(value) }
-    LaunchedEffect(value) { pos = value }
-    val stateText = "${pos.roundToInt()} дБ"
+    val pos = remember { mutableFloatStateOf(value) }
+    // floatValue вместо value: mutableFloatStateOf хранит Float в примитиве,
+    // и обращение через value упаковывало бы его в Float на каждом кадре
+    // (lint AutoboxingStateValueProperty).
+    LaunchedEffect(value) { pos.floatValue = value }
+    val stateText = "${pos.floatValue.roundToInt()} дБ"
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -248,9 +266,9 @@ private fun EqRow(label: String, value: Float, enabled: Boolean,
     // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
     Row(Modifier.fillMaxWidth().height(28.dp)) {
         CompactSlider(
-            value = pos, onValueChange = { pos = it },
-            onValueChangeFinished = { onFinished(pos) },
-            valueRange = -12f..12f, steps = 23, enabled = enabled,
+            value = pos.floatValue, onValueChange = { pos.floatValue = it },
+            onValueChangeFinished = { onFinished(pos.floatValue) },
+            valueRange = Limits.EQ_MIN..Limits.EQ_MAX, steps = 23, enabled = enabled,
             contentDescription = label,
             stateDescriptionText = stateText,
             modifier = Modifier.fillMaxWidth()

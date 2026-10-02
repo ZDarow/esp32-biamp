@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
+import com.kilo.biampcontrol.bt.Limits
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -39,9 +40,12 @@ import kotlin.math.roundToInt
 fun VolumeTab(vm: BiAmpViewModel) {
     val ds by vm.deviceState.collectAsState()
     val connected by vm.connState.collectAsState()
-    val muted0 by vm.isMuted0.collectAsState()
-    val muted1 by vm.isMuted1.collectAsState()
     val enabled = connected == com.kilo.biampcontrol.bt.ConnState.CONNECTED
+    // Mute берётся из строки `Mute: z0/z1` блока status, а не из локального
+    // флага: локальный флаг врал между нажатием и ответом усилителя и
+    // оставался врёным навсегда, если ответ терялся.
+    val muted0 = ds.muted.getOrElse(0) { false }
+    val muted1 = ds.muted.getOrElse(1) { false }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -50,25 +54,29 @@ fun VolumeTab(vm: BiAmpViewModel) {
 Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.titleLarge)
 
         LabeledSlider(
-            label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(),
+            range = Limits.VOL_MIN..Limits.VOL_MAX,
             enabled = enabled, suffix = "%"
         ) { vm.setVolBoth(it.roundToInt()) }
 
         // Левая зона
         LabeledSlider(
-            label = stringResource(R.string.volume_left), value = ds.vol0.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_left), value = ds.vol0.toFloat(),
+            range = Limits.VOL_MIN..Limits.VOL_MAX,
             enabled = enabled, suffix = "%"
         ) { vm.setVol0(it.roundToInt()) }
 
         // Правая зона
         LabeledSlider(
-            label = stringResource(R.string.volume_right), value = ds.vol1.toFloat(), range = 0f..100f,
+            label = stringResource(R.string.volume_right), value = ds.vol1.toFloat(),
+            range = Limits.VOL_MIN..Limits.VOL_MAX,
             enabled = enabled, suffix = "%"
         ) { vm.setVol1(it.roundToInt()) }
 
         // Баланс
         LabeledSlider(
-            label = stringResource(R.string.volume_balance), value = ds.bal, range = -10f..10f,
+            label = stringResource(R.string.volume_balance), value = ds.bal,
+            range = Limits.BAL_MIN..Limits.BAL_MAX,
             enabled = enabled, suffix = "", steps = 19
         ) { vm.setBal(it.roundToInt()) }
 

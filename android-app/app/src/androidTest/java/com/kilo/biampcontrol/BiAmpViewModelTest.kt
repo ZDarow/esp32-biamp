@@ -72,14 +72,16 @@ class BiAmpViewModelTest {
     private lateinit var client: FakeSppClient
     private lateinit var vm: BiAmpViewModel
 
-    /** Блок status прошивки v34 в том виде, в каком он идёт по SPP. */
+    /** Блок status прошивки v35.1 — 13 строк контракта, раздел 2. */
     private val statusBlock = listOf(
         "V0=38% V1=42% bal=-1.50",
         "Fc=350Hz hp=45Hz sub=ON",
         "XO: Butter OFF",
         "TLF=3.00dB THF=0.00dB",
         "EQ: L=2.00 M=0.00 H=1.00",
+        "Mute: 0/0",
         "SWP: 1",
+        "DUP: 0",
         "BT: ON | SPP: ON",
         "Src: 48.0 kHz",
         "Test: 2 TVol=9%",
@@ -121,7 +123,7 @@ class BiAmpViewModelTest {
         assertEquals(2, ds.testMode)
         assertEquals(9, ds.testVol)
         assertFalse("XO: Butter OFF — кроссовер выключен", ds.xoOn)
-        assertTrue("SWP: 1 — перестановка Л и П включена", ds.lrSwap)
+        assertTrue("SWP: 1 — перестановка Л и П включена", ds.swapped)
         assertFalse("полный блок разобран — синхронизация снята", vm.isSyncing.value)
     }
 
@@ -163,7 +165,7 @@ class BiAmpViewModelTest {
     }
 
     @Test
-    fun muteПереключаетсяИУходитВSppНемедленно() = runBlocking {
+    fun muteОтправляетсяАбсолютноИНеОптимистиченДоСтатуса() = runBlocking {
         client.deviceAnswers(*statusBlock.toTypedArray())
         awaitStatusBlock(vm, statusBlock.size)
         client.clearSent()
@@ -171,13 +173,17 @@ class BiAmpViewModelTest {
         vm.toggleMute(0)
         // Фильтруем только mute: раз в 3 с ViewModel шлёт status, и без
         // фильтра тест принимал команду опроса за команду mute.
-        awaitTrue { client.mutes == listOf("mute:0") }
-        assertTrue(vm.isMuted0.value)
+        // Команда абсолютная — контракт v35.1: mute:<зона>:<0|1>.
+        awaitTrue { client.mutes == listOf("mute:0:1") }
+        // Флаг переворачивает не нажатие, а ответ усилителя: до него
+        // индикатор обязан показывать прочитанное состояние.
+        assertFalse(vm.isMuted(0))
 
+        // Повтор без нового блока статуса шлёт ту же цель, а не «переворот».
         vm.toggleMute(0)
         awaitTrue { client.mutes.size == 2 }
-        assertFalse(vm.isMuted0.value)
-        assertEquals(listOf("mute:0", "mute:0"), client.mutes)
+        assertEquals(listOf("mute:0:1", "mute:0:1"), client.mutes)
+        assertFalse(vm.isMuted(0))
     }
 
     @Test

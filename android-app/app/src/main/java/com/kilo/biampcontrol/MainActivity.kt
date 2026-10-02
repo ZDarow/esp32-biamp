@@ -58,11 +58,20 @@ import com.kilo.biampcontrol.ui.theme.BiAmpTheme
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * Запрашиваемые разрешения.
+     *
+     * Список обязан совпадать с манифестом: там объявлены и COARSE, и FINE
+     * для Android 11 и ниже, потому что обеда до Android 12 требовала
+     * оба. Запрашивая только FINE, приложение оставляло объявленное
+     * COARSE неиспользованным, а пользователю — лишний диалог.
+     */
     private val btPermissions: Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
         else
             arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
                     Manifest.permission.ACCESS_FINE_LOCATION)
 
     private val permLauncher =

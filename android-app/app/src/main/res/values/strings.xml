@@ -99,15 +99,11 @@
     <string name="eq_reset_cd">%1$s, сброс в 0 дБ</string>
     <string name="band_title">Полосы — подстройка полосы</string>
     <string name="band_caption">Дополнительные фильтры и уровень одной полосы поверх общего кроссовера. Применяются после него, поэтому могут только сузить диапазон полосы, но не расширить его за Fc.</string>
-    <string name="lr_swap">Перестановка Л/П</string>
+<string name="lr_swap">Перестановка Л/П</string>
     <string name="lr_swap_caption">Меняет выходы усилителя местами, если левый канал слышен в правом динамике. Провода трогать не нужно.</string>
     <string name="lr_switch">Поменять каналы местами</string>
 
     <!-- Имена каналов: порядок совпадает с индексами ch_hp/ch_lp -->
-    <string name="channel_lf">НЧ-Л</string>
-    <string name="channel_hf_l">ВЧ-Л</string>
-    <string name="channel_lf_r">НЧ-П</string>
-    <string name="channel_hf_r">ВЧ-П</string>
     <string name="band_mid">СЧ-Динамики</string>
     <string name="band_high">ВЧ-Динамики</string>
 
@@ -121,10 +117,14 @@
     <string name="scope_note">График и кнопки относятся только к полосе %1$s. Общий кроссовер (Fc, сабсоник) на нём не показан и применяется раньше — см. блок «Кроссовер — общий срез».</string>
     <string name="stepper_dec">%1$s, уменьшить</string>
     <string name="stepper_inc">%1$s, увеличить</string>
-    <string name="stepper_toggle">%1$s, переключить</string>
     <string name="filter_hz">%1$d Гц</string>
     <string name="filter_khz">кГц</string>
     <string name="filter_disabled">выключен</string>
     <string name="filter_off">выкл</string>
+
+    <!-- Раскладка выходов: строки SWP/DUP контракта (раздел 2). -->
+    <string name="swap_switch">Перестановка L/R</string>
+    <string name="dup_switch">Дублировать на 2, 3</string>
+    <string name="dup_warning">DUP: 1 — каналы 2 и 3 физически молчат. Восстановить</string>
 
 </resources>
