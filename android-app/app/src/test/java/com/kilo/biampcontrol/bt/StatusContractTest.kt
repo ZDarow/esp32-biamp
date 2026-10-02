@@ -23,24 +23,16 @@ import java.io.File
 class StatusContractTest {
 
     /**
-     * Блок `status` прошивки v35.1 — цитата из status-contract.md, раздел 2.
-     * Порядок фиксирован, последняя строка `Delay:`.
+     * Блок `status` прошивки v35.1 — читается ДОСЛОВНО из
+     * firmware/protocol/status-contract.md, раздел 2, функцией
+     * [contractBlockOrSkip]. Порядок строк фиксирован, последняя — `Delay:`.
+     *
+     * Раньше блок хранился здесь цитатой. Цитата была верной, но её
+     * соответствие контракту никто не проверял: правка контракта оставляла
+     * тест зелёным. Теперь источник один, и Android не может разойтись с
+     * прошивкой незаметно.
      */
-    private val contractBlock = listOf(
-        "V0=40% V1=40% bal=0.00",
-        "Fc=400Hz hp=45Hz sub=ON",
-        "XO: Butter ON",
-        "TLF=0.00dB THF=-1.00dB",
-        "EQ: L=0.00 M=0.00 H=0.00",
-        "Mute: 0/0",
-        "SWP: 0",
-        "DUP: 0",
-        "BT: ON | SPP: OFF",
-        "Src: 44.1 kHz",
-        "Test: 0 TVol=4%",
-        "CHF: 0/0 0/0 0/0 0/0",
-        "Delay: 0/0/0/0"
-    )
+    private val contractBlock by lazy { contractBlockOrSkip() }
 
     /** Блок содержит ровно 13 строк — столько же, сколько в контракте. */
     @Test
