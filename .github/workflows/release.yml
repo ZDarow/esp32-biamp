@@ -40,6 +40,8 @@ jobs:
     steps:
       - name: Копирование репозитория
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Определение тега
         id: meta
@@ -91,7 +93,23 @@ jobs:
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=921600" \
             --build-path "$PWD/.build/firmware" \
+            --warnings all \
             firmware/ESP32_BiAmp
+
+      - name: Проверка размера образа
+        run: |
+          BIN="$PWD/.build/firmware/ESP32_BiAmp.ino.bin"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::Не найден скомпилированный образ $BIN"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$BIN")
+          LIMIT=3145728
+          echo "Размер образа: $SIZE байт из $LIMIT ($(echo "scale=1; $SIZE*100/$LIMIT" | bc)%)"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::Образ не помещается в раздел huge_app"
+            exit 1
+          fi
 
       - name: Упаковка прошивки в ZIP
         run: |
@@ -131,6 +149,8 @@ jobs:
     steps:
       - name: Копирование репозитория
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Определение тега
         id: meta
@@ -145,17 +165,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Кэширование Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android-app/**/*.gradle.kts', 'android-app/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
+      - name: Установка Gradle
+        uses: gradle/actions/setup-gradle@v1
 
       - name: Указание пути к Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      # Lint + unit tests на debug build гарантируют, что релиз не уйдёт
+      # с красным прогоном. Объединены с сборкой в один вызов gradle —
+      # setup-gradle управляет демоном, --no-daemon не нужен.
+      - name: Статический анализ (lint)
+        run: ./gradlew lintDebug testDebugUnitTest
 
       - name: Восстановление ключа подписи
         run: |
@@ -176,16 +196,44 @@ jobs:
           echo "Ключ подписи восстановлен"
 
       - name: Сборка APK
-        run: ./gradlew --no-daemon assembleRelease
+        run: ./gradlew assembleRelease
 
       - name: Проверка подписи APK
         run: |
+          set -euo pipefail
           APK="app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK" ]; then
             echo "::error::Ожидался подписанный $APK, найдено: $(ls app/build/outputs/apk/release/)"
             exit 1
           fi
-          echo "APK собран и подписан: $APK"
+          # apksigner входит в Android SDK build-tools.
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME/build-tools"/*/ 2>/dev/null | sort -V | tail -1)
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then
+            echo "::error::apksigner не найден в $ANDROID_HOME/build-tools — установите build-tools"
+            exit 1
+          fi
+          # Верификация подписи: apksigner проверяет структуру V2/V3 и целостность.
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          # Выделяем SHA-256 отпечаток сертификата.
+          CERT_FP=$(keytool -printcert -jarfile "$APK" -rfc 2>/dev/null | grep -A1 "SHA-256:" | tail -1 | tr -d ' ')
+          echo "SHA-256 сертификата: $CERT_FP"
+          # Если секрет с отпечатком задан — сверяем строго.
+          # Если недоступен — проверка выше гарантирует валидную подпись с
+          # корректным алгоритмом; отпечаток стоит добавить как
+          # ANDROID_SIGNING_CERT_FINGERPRINT для строгой сверки.
+          if [ -n "${{ secrets.ANDROID_SIGNING_CERT_FINGERPRINT }}" ]; then
+            EXPECTED="${{ secrets.ANDROID_SIGNING_CERT_FINGERPRINT }}"
+            if [ "$CERT_FP" != "$EXPECTED" ]; then
+              echo "::error::Отпечаток сертификата ($CERT_FP) не совпадает с ожидаемым"
+              exit 1
+            fi
+            echo "Отпечаток сертификата подтверждён"
+          else
+            echo "Внимание: ANDROID_SIGNING_CERT_FINGERPRINT не задан — сверка отпечатка пропущена."
+            echo " apksigner verify прошёл успешно, подпись валидна."
+          fi
+          echo "APK подписан и верифицирован: $APK"
 
       - name: Подготовка APK к выгрузке
         run: |
@@ -220,6 +268,8 @@ jobs:
     steps:
       - name: Копирование репозитория
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Скачивание артефактов
         uses: actions/download-artifact@v4

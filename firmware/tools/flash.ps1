@@ -1,4 +1,4 @@
-﻿# Прошивка скетча BT_esp на плату
+﻿# Прошивка скетча ESP32_BiAmp на плату
 # Использование:
 #   pwsh -File .\tools\flash.ps1                # сборка + прошивка
 #   pwsh -File .\tools\flash.ps1 -Port COM14    # указать порт
@@ -24,10 +24,30 @@ if (-not $NoBuild) { Invoke-Compile -Quiet }
 Get-Firmware | Out-Null
 $cli = Get-Cli
 
+# Предварительная проверка порта: опечатка в номере приводит к попытке
+# стереть или прошить несуществующий порт. Выводим все доступные порты.
+if ($Script:Port -eq 'COM_PORT_NOT_SET') {
+    Write-Host "[flash] порт не задан (BT_ESP_PORT не установлен, -Port не передан)" -ForegroundColor Red
+    Write-Host "[flash] доступные порты:" -ForegroundColor Yellow
+    & $cli board list 2>&1 | Write-Host
+    throw "Порт не задан. Задайте -Port COMxx или переменную BT_ESP_PORT."
+}
+$escapedPort = [regex]::Escape($Script:Port)
+$portFound = & $cli board list 2>$null | Select-String -Pattern "\b$escapedPort\b"
+if (-not $portFound) {
+    Write-Host "[flash] порт $Script:Port не найден. Доступные порты:" -ForegroundColor Red
+    & $cli board list 2>&1 | Write-Host
+    throw "Порт $Script:Port не найден в выводе arduino-cli board list"
+}
+
 if ($Erase) {
-    $esptool = Get-EsptoolPath
+    $esptoolInfo = Get-EsptoolPath
     Write-Host "[flash] стирание флеша (смена разметки разделов)" -ForegroundColor Yellow
-    & $esptool --chip esp32 --port $Script:Port erase_flash
+    if ($esptoolInfo.Interpreter) {
+        & $esptoolInfo.Interpreter $esptoolInfo.Path --chip esp32 --port $Script:Port erase_flash
+    } else {
+        & $esptoolInfo.Path --chip esp32 --port $Script:Port erase_flash
+    }
     if ($LASTEXITCODE -ne 0) { throw "Стирание не удалось (код $LASTEXITCODE)" }
     Start-Sleep -Seconds 2
 }

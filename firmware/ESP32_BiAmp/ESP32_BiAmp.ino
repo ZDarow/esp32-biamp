@@ -1,7 +1,7 @@
 /**
  * @file ESP32_BiAmp.ino
  * @brief Би-амп ESP32: приём A2DP-аудио и вывод на два I2S-порта,
- *        управление по Bluetooth SPP. Версия 34.
+ *        управление по Bluetooth SPP. Версия 35.
  *
  * Описание архитектуры, всех команд и диагностики — в firmware/DOCUMENTATION.md.
  *
@@ -30,7 +30,7 @@
  *        v31: на старте потока обнуляются состояния biquad'ов, линии задержки
  *             и рампы громкости (событие t=7). После паузы источника
  *             фильтры хранили отсчёты двухминутной давности, и первый блок
- *             выходил со ступенькой — щелчком. Счётчик Starve теперь меряет
+ *             выходил со ступенькой — щелчок. Счётчик Starve теперь меряет
  *             разрывы только внутри играющего потока: пауза источника
  *             (заблокированный экран останавливает A2DP, но is_playing
  *             остаётся true) раньше попадала в него целиком и давала
@@ -50,7 +50,7 @@
  *             поднят до 80 мс — по запасу кольца (93 мс). Отметка времени
  *             последнего пакета вынесена в starve_last_ms и сбрасывается в
  *             audio_state_cb: на паузе колбэк A2DP не приходит вовсе, и без
- *             сброса первый пакет нового потока посчитал бы всю паузу
+ *             сбрасывания первый пакет нового потока посчитал бы всю паузу
  *             провалом (наблюдалось t=1 v=3075).
  *        v34: щелчок на границах потока измерен прибором, а не на слух.
  *             Команда click меряет размах выхода в первых 256 кадрах после
@@ -60,6 +60,10 @@
  *             CLICK_PROBE_SELFTEST) дал Start max 1985 при уровне сигнала
  *             168 — 1181% от сигнала, выход прыгал в 12 раз выше нужного.
  *             С фиксом на том же устройстве: Start 0, Fade end 0.
+ *        v35: mute: абсолютная установка mute:z:0|1 + совместимый переключатель mute:z;
+ *             DUP: всегда в status; lr_swap восстановлен из NVS; защита factory/reboot по SPP;
+ *             исправлена гонка click_*; BadSamples → RingBad (ошибки кольца в аудиозадаче);
+ *             und/clip — сброс каждые 5 с задокументирован.
  *
  * @author Kilo
  * @license GNU General Public License v3.0 or later
@@ -83,12 +87,18 @@
 #include <ctype.h>
 #include <atomic>
 
+// Выводы I²S разведены по двум портам: каждому усилилю свой порт со своими
+// тремя выводами. Общие пины у портов быть не могут — иначе один порт
+// перезапишет выводы другого при инициализации и оба зазвучат неверно.
+// Z1 — левый усилитель: BCK 4, LCK 15, DIN 2.
+// Z2 — правый усилитель: BCK 25, LCK 27, DIN 26. Порядок BCK/DIN здесь
+// обратный относительно Z1 и взят с реальной разводки платы.
 #define Z1_BCK 4
 #define Z1_LCK 15
 #define Z1_DIN 2
-#define Z2_BCK 26
-#define Z2_LCK 25
-#define Z2_DIN 27
+#define Z2_BCK 25
+#define Z2_LCK 27
+#define Z2_DIN 26
 #define OLED_SDA 21
 #define OLED_SCL 22
 #define OLED_ADDR 0x3C
@@ -149,7 +159,18 @@ uint8_t xo_type = 1;
 // как bypass. Сабсоник (секция 0) и полосные фильтры при этом остаются
 // включены — выключается именно разделение на НЧ/ВЧ-ветку.
 bool  xo_on = true;
-bool  inv_ch[4] = {false, false, false, false};
+// Перестановка выходов Л/П: при true каналы 0,1 уходят в правый разъём,
+// а 2,3 — в левый. Нужна, если усилитель физически подключён наоборот:
+// менять провода не всегда возможно, а слышать левый канал в правом
+// динамике неправильно. Инверсия фазы для этого не годится — она
+// переворачивает сигнал, а меняет стороны света.
+bool  lr_swap = false;
+// Диагностическое дублирование выходов: при true оба I²S-порта получают
+// байт-в-байт один и тот же блок, то есть на оба ЦАПа уходит идентичный
+// поток. Нужно, чтобы осциллографом или вторым усилителем проверить, что
+// физически приходит на каждое гнездо и одинаково ли. В обычной работе
+// выключено, и каналы 2,3 уходят в правый разъём как положено.
+bool  dup_out = false;
 float ch_hp[4] = {0, 0, 0, 0};
 float ch_lp[4] = {0, 0, 0, 0};
 uint16_t ch_delay[4] = {0, 0, 0, 0};
@@ -166,7 +187,13 @@ std::atomic<uint32_t> g_in_frames{0};
 
 std::atomic<uint8_t> test_mode{0};
 std::atomic<float>   test_freq{440.0f};
-std::atomic<float>   test_vol{0.06f};
+// Громкость тест-сигнала. Акустика подключена к усилителям и играет в
+// комнате, поэтому по умолчанию 4%, а жёсткий потолок 6%: тест слышно как
+// щелчок проверки, а не как музыка. Потолок держит сам safeCmdVal() —
+// выставить выше нельзя даже вручную.
+#define TEST_VOL_DEFAULT 0.04f
+#define TEST_VOL_MAX     0.06f
+std::atomic<float>   test_vol{TEST_VOL_DEFAULT};
 
 std::atomic<uint32_t> starve_cnt{0}, starve_max_ms{0};
 // Отметка времени последнего пакета A2DP для счётчика Starve. Сбрасывается
@@ -197,8 +224,15 @@ struct AudioParams {
   float bl, br;
   float vol[2];
   bool  mute[2];
-  bool  inv[4];
   uint16_t dly[4];
+  // Перестановка выходов Л/П едет в снимке, а не живёт отдельной глобалкой:
+  // задача вывода читает ap только через refreshParams(), поэтому и swap
+  // обязан приходить тем же снимком. Отдельная переменная, которую читает
+  // audioTask, а пишет loop, — это гонка: компилятор вправе переставить
+  // чтение относительно записи, и кадр может уйти с перепутанными каналами.
+  // Дублирование едет в том же снимке по той же причине.
+  bool  swap;
+  bool  dup;
 };
 
 static AudioParams shadow_ap;            // владеет loop, пишется под ctrl_mux
@@ -238,10 +272,13 @@ struct PBlob {
   uint16_t dly[4];
   // xoon добавлен последним: так поля v21 остаются на прежних смещениях,
   // и старый блоб можно принять целиком, а не сбрасывать настройки.
-  uint8_t m0, m1, sub, xot, invm, xoon;
+  // invm переименован в swp на том же месте: инверсия фазы убрана,
+  // вместо неё перестановка Л/П. Размер и смещения не изменились,
+  // поэтому старый блоб читается как есть — просто его invm игнорируется.
+  uint8_t m0, m1, sub, xot, swp, xoon;
 } __attribute__((packed));
 
-constexpr uint32_t PBLOB_VERSION = 22;
+constexpr uint32_t PBLOB_VERSION = 23;
 
 // Запись и чтение журнала под мьютексом: запись записи должна быть атомарной.
 void logEvent(uint8_t type, uint16_t val) {
@@ -346,7 +383,9 @@ void scheduleFilterUpdate() {
   tmp.br = 1.0f + bal * 0.03f;
   tmp.vol[0] = vol_z[0]; tmp.vol[1] = vol_z[1];
   tmp.mute[0] = muted_z[0]; tmp.mute[1] = muted_z[1];
-  for (uint8_t c = 0; c < 4; c++) { tmp.inv[c] = inv_ch[c]; tmp.dly[c] = ch_delay[c]; }
+  for (uint8_t c = 0; c < 4; c++) { tmp.dly[c] = ch_delay[c]; }
+  tmp.swap = lr_swap;
+  tmp.dup = dup_out;
   portENTER_CRITICAL(&ctrl_mux);
   memcpy(&shadow_ap, &tmp, sizeof(tmp));
   ap_dirty.store(true, std::memory_order_release);
@@ -367,6 +406,12 @@ void scheduleFilterUpdate() {
 //
 // Уровень сигнала (click_level) нужен как масштаб: он показывает, сколько
 // было бы слышно при ступеньке. Отношение start/level и есть искомый ответ.
+//
+// click_start_max, click_fade_max, click_level пишутся из audioTask и читаются
+// из loopTask (команда click). Для согласованного снимка используем критическую
+// секцию click_mux — на ESP32 это даёт атомарность между ядрами без накладных
+// расходов мьютекса FreeRTOS. Операции внутри короткие, portENTER_CRITICAL
+// подходит лучше, чем std::mutex.
 #define CLICK_PROBE_FRAMES 256
 static std::atomic<int32_t> click_probe{0};      // осталось кадров в окне
 static std::atomic<bool>    click_probe_armed{false};
@@ -375,6 +420,7 @@ static uint32_t click_fade_max[2] = {0, 0};
 static uint32_t click_level = 0;                  // типичный размах сигнала
 static uint32_t click_blk = 0;                   // счётчик блоков для выборки
 static uint8_t  click_dst = 0;                    // 0 — в start, 1 — в fade
+static portMUX_TYPE click_mux = portMUX_INITIALIZER_UNLOCKED;
 
 inline uint32_t abs16(int16_t v) { return (uint32_t)(v < 0 ? -(int32_t)v : v); }
 
@@ -485,6 +531,13 @@ void processBlock(const int16_t *in, int n) {
   computeTargets(test_on, tgt);
   uint8_t mask = test_on ? testMaskOf(tm) : 0xF;
 
+  // Какой буфер физически уходит в каждый порт. При дублировании оба порта
+  // читают один и тот же буфер, иначе в z2 ушёл бы блок, который никто не
+  // заполнил: подменить только раскладку слотов мало, нужно ещё и то, откуда
+  // берётся write() — он читает буфер поимённо.
+  int16_t *const pb1 = bz1;
+  int16_t *const pb2 = ap.dup ? bz1 : bz2;
+
   for (int f = 0; f < n; f++) {
     // Гашение идёт быстрее обычной рампы громкости, но всё ещё плавно:
     // выход не должен прыгнуть к нулю скачком.
@@ -500,17 +553,37 @@ void processBlock(const int16_t *in, int n) {
     for (uint8_t c = 0; c < 4; c++) {
       float v = runCh(raw[c], c);
       v = applyDelay(v, c, ap.dly[c]);
-      if (ap.inv[c]) v = -v;
       if (!(mask & (1 << c))) v = 0.0f;
       out[c] = softClip(v * gain[c], c);
     }
-    bz1[f * 2] = (int16_t)(out[0] * 32767); bz1[f * 2 + 1] = (int16_t)(out[1] * 32767);
-    bz2[f * 2] = (int16_t)(out[2] * 32767); bz2[f * 2 + 1] = (int16_t)(out[3] * 32767);
+    // Перестановка Л/П делается на готовых отсчётах, а не на входе:
+    // так каналы меняются местами целиком, вместе со своей обработкой.
+    // Флаг берётся из ap — личного снимка задачи вывода, а не из общей
+    // переменной: иначе переключатель мог бы смениться посреди блока и
+    // половина кадра ушла бы в левый разъём, половина — в правый.
+    int16_t *o1 = pb1 + f * 2;
+    int16_t *o2 = pb2 + f * 2;
+    if (ap.dup) {
+      // Диагностика: оба указателя на один и тот же буфер, поэтому в z1 и z2
+      // уходит побайтово идентичный блок. Дублировать нужно именно поток на
+      // ЦАП, а не только набор параметров, иначе сравнивать было бы нечего.
+      // Каналы 2,3 в этом режиме не выводятся: обе пары полос сходятся в
+      // левый буфер, поэтому их обработка уходит в никуда.
+      o1[0] = (int16_t)(out[0] * 32767);
+      o1[1] = (int16_t)(out[1] * 32767);
+    }
+    else {
+      o1[0] = (int16_t)(out[ap.swap ? 2 : 0] * 32767);
+      o1[1] = (int16_t)(out[ap.swap ? 3 : 1] * 32767);
+      o2[0] = (int16_t)(out[ap.swap ? 0 : 2] * 32767);
+      o2[1] = (int16_t)(out[ap.swap ? 1 : 3] * 32767);
+    }
     // Замер окна границы потока: ищем максимум размаха, а не разницу между
     // отсчётами. Размах не зависит от того, попал ли сам щелчок в этот кадр:
     // если ступенька есть, она сделает максимум большим в любом случае.
     if (click_probe_armed.load(std::memory_order_relaxed)) {
-      uint32_t m1 = abs16(bz1[f * 2]), m2 = abs16(bz2[f * 2]);
+      uint32_t m1 = abs16(pb1[f * 2]), m2 = abs16(pb2[f * 2]);
+      portENTER_CRITICAL(&click_mux);
       if (m1 > click_start_max[0] || m2 > click_start_max[1]) {
         if (m1 > click_start_max[0]) click_start_max[0] = m1;
         if (m2 > click_start_max[1]) click_start_max[1] = m2;
@@ -519,6 +592,7 @@ void processBlock(const int16_t *in, int n) {
         click_probe_armed.store(false, std::memory_order_relaxed);
         if (click_dst == 1) { click_fade_max[0] = click_start_max[0]; click_fade_max[1] = click_start_max[1]; }
       }
+      portEXIT_CRITICAL(&click_mux);
     }
   }
 
@@ -531,12 +605,14 @@ void processBlock(const int16_t *in, int n) {
   if (!click_probe_armed.load(std::memory_order_relaxed) && ((click_blk++ & 63u) == 0)) {
     for (int i = 0; i < n; i++) {
       uint32_t m = abs16(bz1[i * 2]);
+      portENTER_CRITICAL(&click_mux);
       if (m > click_level) click_level = m;
+      portEXIT_CRITICAL(&click_mux);
     }
   }
   uint32_t t_wr = micros();
-  bool w1 = (i2s_z1.write((uint8_t *)bz1, bytes) == bytes);
-  bool w2 = (i2s_z2.write((uint8_t *)bz2, bytes) == bytes);
+  bool w1 = (i2s_z1.write((uint8_t *)pb1, bytes) == bytes);
+  bool w2 = (i2s_z2.write((uint8_t *)pb2, bytes) == bytes);
   uint32_t dw = micros() - t_wr;
   if (dw > wr_max_us.load(std::memory_order_relaxed)) wr_max_us.store(dw, std::memory_order_relaxed);
   if (!w1) { und_z[0].fetch_add(1, std::memory_order_relaxed); logEvent(2, 0); }
@@ -739,68 +815,73 @@ static void setI2SWriteTimeoutMs(TickType_t ms) {
 }
 
 // Сброс состояния DSP при старте потока. Вызывается только из audioTask,
-// поэтому гонки с processBlock нет. Кольцо здесь не трогаем: его сбрасывает
-// ring_flush, выставленный тем же колбэком.
-void resetDspState() {
-  memset(st1, 0, sizeof(st1));
-  memset(st2, 0, sizeof(st2));
-  memset(chst, 0, sizeof(chst));
-  for (uint8_t c = 0; c < 4; c++) {
-    memset(delay_buf[c], 0, sizeof(delay_buf[c]));
-    delay_idx[c] = 0;
-  }
-  // Рампы громкости тоже к нулю: иначе на первом кадре усиление прыгнет
-  // от значения, набранного до паузы.
-  for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
-  // Замеряем первые кадры нового потока: если ступенька на старте есть, она
-  // попадёт в этот максимум.
-  click_start_max[0] = 0; click_start_max[1] = 0;
-  click_dst = 0;
-  click_probe.store(CLICK_PROBE_FRAMES, std::memory_order_relaxed);
-  click_probe_armed.store(true, std::memory_order_relaxed);
-  logEvent(7, 0);
-}
-
-// Плавное сведение выхода в ноль при остановке потока.
-//
-// Пока телефон молчит, кольцо пусто и задача вывода простаивает, не записав
-// в I2S ничего: DMA доигрывает последний блок и замирает на нём. Если в этом
-// отсчёте ненулевое значение (а оно почти всегда ненулевое — сигнал живой),
-// усилитель получает ступеньку и динамик щёлкает на паузе.
-//
-// Поэтому при остановке потока прогоняем через DSP тишину, уводя gain в ноль
-// рампой FADE_K, и дописываем в I2S блок, который уже целиком нулевой: DMA
-// замирает на нуле, и следующий поток начинается с тишины, а не со ступеньки.
-#define FADE_MAX_FRAMES 2048   // 46 мс @44.1 кГц
-void fadeOutDsp() {
-  dsp_fade = true;
-  static int16_t zbuf[BLOCK_FRAMES * 2];
-  memset(zbuf, 0, sizeof(zbuf));
-  uint32_t frames = 0;
-  // Выходим, как только gain всех каналов ниже FADE_EPS, иначе жжём лишние
-  // 46 мс тишины в I2S на каждой паузе. Потолок нужен на случай, если рампы
-  // не достигли нуля: громкость могла вырасти в ходе гашения (новые цели от
-  // команды vol:), и тогда gain снова растёт, а не падает.
-  while (frames < FADE_MAX_FRAMES) {
-    processBlock(zbuf, BLOCK_FRAMES);
-    frames += BLOCK_FRAMES;
-    bool quiet = true;
-    for (uint8_t c = 0; c < 4; c++) {
-      if (gain[c] > FADE_EPS) { quiet = false; break; }
-    }
-    if (quiet) break;
-  }
-  dsp_fade = false;
-  // Последний блок нулевой целиком: DMA останавливается на тишине. Замеряем
-  // его размах — это ответ на вопрос, остался ли щелчок на остановке.
-  click_start_max[0] = 0; click_start_max[1] = 0;
-  click_dst = 1;
-  click_probe.store(BLOCK_FRAMES, std::memory_order_relaxed);
-  click_probe_armed.store(true, std::memory_order_relaxed);
-  processBlock(zbuf, BLOCK_FRAMES);
-  for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
-  logEvent(8, (uint16_t)frames);
-}
+ // поэтому гонки с processBlock нет. Кольцо здесь не трогаем: его сбрасывает
+ // ring_flush, выставленный тем же колбэком.
+ void resetDspState() {
+   memset(st1, 0, sizeof(st1));
+   memset(st2, 0, sizeof(st2));
+   memset(chst, 0, sizeof(chst));
+   for (uint8_t c = 0; c < 4; c++) {
+     memset(delay_buf[c], 0, sizeof(delay_buf[c]));
+     delay_idx[c] = 0;
+   }
+   // Рампы громкости тоже к нулю: иначе на первом кадре усиление прыгнет
+   // от значения, набранного до паузы.
+   for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
+   // Замеряем первые кадры нового потока: если ступенька на старте есть, она
+   // попадёт в этот максимум.
+   portENTER_CRITICAL(&click_mux);
+   click_start_max[0] = 0; click_start_max[1] = 0;
+   click_fade_max[0] = 0; click_fade_max[1] = 0;
+   portEXIT_CRITICAL(&click_mux);
+   click_dst = 0;
+   click_probe.store(CLICK_PROBE_FRAMES, std::memory_order_relaxed);
+   click_probe_armed.store(true, std::memory_order_relaxed);
+   logEvent(7, 0);
+ }
+ 
+ // Плавное сведение выхода в ноль при остановке потока.
+ //
+ // Пока телефон молчит, кольцо пусто и задача вывода простаивает, не записав
+ // в I2S ничего: DMA доигрывает последний блок и замирает на нём. Если в этом
+ // отсчёте ненулевое значение (а оно почти всегда ненулевое — сигнал живой),
+ // усилитель получает ступеньку и динамик щёлкает на паузе.
+ //
+ // Поэтому при остановке потока прогоняем через DSP тишину, уводя gain в ноль
+ // рампой FADE_K, и дописываем в I2S блок, который уже целиком нулевой: DMA
+ // замирает на нуле, и следующий поток начинается с тишины, а не со ступеньки.
+ #define FADE_MAX_FRAMES 2048   // 46 мс @44.1 кГц
+ void fadeOutDsp() {
+   dsp_fade = true;
+   static int16_t zbuf[BLOCK_FRAMES * 2];
+   memset(zbuf, 0, sizeof(zbuf));
+   uint32_t frames = 0;
+   // Выходим, как только gain всех каналов ниже FADE_EPS, иначе жжём лишние
+   // 46 мс тишины в I2S на каждой паузе. Потолок нужен на случай, если рампы
+   // не достигли нуля: громкость могла вырасти в ходе гашения (новые цели от
+   // команды vol:), и тогда gain снова растёт, а не падает.
+   while (frames < FADE_MAX_FRAMES) {
+     processBlock(zbuf, BLOCK_FRAMES);
+     frames += BLOCK_FRAMES;
+     bool quiet = true;
+     for (uint8_t c = 0; c < 4; c++) {
+       if (gain[c] > FADE_EPS) { quiet = false; break; }
+     }
+     if (quiet) break;
+   }
+   dsp_fade = false;
+   // Последний блок нулевой целиком: DMA останавливается на тишине. Замеряем
+   // его размах — это ответ на вопрос, остался ли щелчок на остановке.
+   portENTER_CRITICAL(&click_mux);
+   click_start_max[0] = 0; click_start_max[1] = 0;
+   portEXIT_CRITICAL(&click_mux);
+   click_dst = 1;
+   click_probe.store(BLOCK_FRAMES, std::memory_order_relaxed);
+   click_probe_armed.store(true, std::memory_order_relaxed);
+   processBlock(zbuf, BLOCK_FRAMES);
+   for (uint8_t c = 0; c < 4; c++) gain[c] = 0.0f;
+   logEvent(8, (uint16_t)frames);
+ }
 
 void audioTask(void *) {
   setI2SWriteTimeoutMs(pdMS_TO_TICKS(I2S_WRITE_TIMEOUT_MS));
@@ -947,13 +1028,32 @@ void on_sample_rate(uint16_t rate) {
   }
 }
 
+// Выдать строку в USB-порт и, если телефон подключён, в SPP.
+//
+// Про `availableForWrite()` здесь важно: BluetoothSerial в ядре ESP32 3.x
+// этого метода НЕ переопределяет, а базовый Print::availableForWrite()
+// возвращает 0. Проверка «свободно ли место в буфере» таким вызовом всегда
+// даёт false, то есть гейт `hasClient() && availableForWrite() > 0`
+// молча отключает всю выдачу в SPP: телефон шлёт команды, плата на них
+// отвечает в порт, а приложение не получает ни одной строки. Место в буфере
+// вместо этого проверяется по факту: println возвращает, сколько байт
+// BluetoothSerial принял на самом деле.
 void say(const String &s) {
   Serial.println(s);
-  if (SerialBT.hasClient()) SerialBT.println(s);
+  if (!SerialBT.hasClient()) return;
+  size_t sent = SerialBT.print(s);
+  sent += SerialBT.println();
+  if (sent < s.length() + 2) {
+    Serial.println(F("SPP: строка обрезана, буфер переполнен"));
+  }
 }
 void say(const __FlashStringHelper *s) {
   Serial.println(s);
-  if (SerialBT.hasClient()) SerialBT.println(s);
+  if (!SerialBT.hasClient()) return;
+  if (SerialBT.print(s) == 0) {
+    Serial.println(F("SPP: строка не отправлена, буфер переполнен"));
+  }
+  SerialBT.println();
 }
 
 // ===================== NVS =============================================
@@ -970,7 +1070,7 @@ void saveAllParams() {
   b.eq0 = eq_db[0]; b.eq1 = eq_db[1]; b.eq2 = eq_db[2];
   b.bal = bal; b.tvol = test_vol.load();
   for (uint8_t c = 0; c < 4; c++) { b.chh[c] = ch_hp[c]; b.chl[c] = ch_lp[c]; b.dly[c] = ch_delay[c]; }
-  b.invm = (inv_ch[0]?1:0)|(inv_ch[1]?2:0)|(inv_ch[2]?4:0)|(inv_ch[3]?8:0);
+  b.swp = lr_swap ? 1 : 0;
   bool ok = (prefs.putBytes("blob", &b, sizeof(b)) == sizeof(b));
   uint32_t dt = millis() - t0;
   if (dt > nvs_max_ms.load(std::memory_order_relaxed)) nvs_max_ms.store(dt, std::memory_order_relaxed);
@@ -989,8 +1089,8 @@ void applyBlob(const PBlob &b) {
   bal = b.bal; test_vol.store(b.tvol);
   for (uint8_t c = 0; c < 4; c++) {
     ch_hp[c] = b.chh[c]; ch_lp[c] = b.chl[c]; ch_delay[c] = b.dly[c];
-    inv_ch[c] = (b.invm >> c) & 1;
   }
+  lr_swap = (b.swp != 0);
 }
 
 void sanitizeParams() {
@@ -1002,7 +1102,8 @@ void sanitizeParams() {
   if (!isfinite(bal) || bal < -10 || bal > 10) bal = 0;
   for (uint8_t e = 0; e < 3; e++) if (!isfinite(eq_db[e]) || eq_db[e] < -12 || eq_db[e] > 12) eq_db[e] = 0;
   if (xo_type < 1 || xo_type > 2) xo_type = 1;
-  { float tv = test_vol.load(); if (!isfinite(tv) || tv < 0 || tv > 1) test_vol.store(0.06f); }
+  { float tv = test_vol.load();
+    if (!isfinite(tv) || tv < 0 || tv > TEST_VOL_MAX) test_vol.store(TEST_VOL_DEFAULT); }
   for (uint8_t c = 0; c < 4; c++) {
     if (!isfinite(ch_hp[c]) || ch_hp[c] < 0 || ch_hp[c] > 20000) ch_hp[c] = 0;
     if (!isfinite(ch_lp[c]) || ch_lp[c] < 0 || ch_lp[c] > 20000) ch_lp[c] = 0;
@@ -1066,7 +1167,7 @@ static bool cmdArgIs(const char *cmd, const char *arg) {
 
 #define TOUCH() do { scheduleFilterUpdate(); paramsDirty = true; paramsChangedAt = millis(); } while (0)
 
-void dispatchCommand(const char *cmd) {
+void dispatchCommand(const char *cmd, bool from_spp) {
   float v;
   if (cmdIs(cmd, "vol:")) {
     if (safeCmdVal(cmd, v, 0, 100)) { vol_z[0] = vol_z[1] = v / 100.0f; TOUCH(); }
@@ -1081,7 +1182,29 @@ void dispatchCommand(const char *cmd) {
     if (safeCmdVal(cmd, v, -10, 10)) { bal = v; TOUCH(); }
   }
   else if (cmdIs(cmd, "mute:")) {
-    if (safeCmdVal(cmd, v, 0, 1)) { uint8_t z = (uint8_t)v; muted_z[z] = !muted_z[z]; TOUCH(); }
+    const char *p = strchr(cmd, ':');
+    if (p) {
+      const char *second_colon = strchr(p + 1, ':');
+      if (second_colon) {
+        // mute:z:0|1 — абсолютная установка
+        float v;
+        if (parseFloat(second_colon + 1, v, 0, 1)) {
+          uint8_t z = (uint8_t)strtoul(p + 1, nullptr, 10);
+          if (z <= 1) {
+            muted_z[z] = (v != 0.0f);
+            TOUCH();
+          }
+        }
+      } else {
+        // mute:z — старая семантика переключателя (совместимость)
+        float v;
+        if (safeCmdVal(cmd, v, 0, 1)) {
+          uint8_t z = (uint8_t)v;
+          muted_z[z] = !muted_z[z];
+          TOUCH();
+        }
+      }
+    }
   }
   else if (cmdIs(cmd, "fc:")) {
     if (safeCmdVal(cmd, v, 200, 1000)) { fc_hz = v; TOUCH(); }
@@ -1113,16 +1236,14 @@ void dispatchCommand(const char *cmd) {
   else if (cmdIs(cmd, "xo:")) {
     if (safeCmdVal(cmd, v, 0, 1)) { xo_on = ((int)v == 1); TOUCH(); }
   }
-  else if (cmdIs(cmd, "inv:")) {
-    bool changed = false;
-    if (cmdArgIs(cmd, "off")) {
-      for (uint8_t c = 0; c < 4; c++) inv_ch[c] = false;
-      changed = true;
-    } else if (safeCmdVal(cmd, v, 0, 3)) {
-      inv_ch[(int)v] = !inv_ch[(int)v];
-      changed = true;
-    }
-    if (changed) TOUCH();
+  else if (cmdIs(cmd, "swap:")) {
+    if (safeCmdVal(cmd, v, 0, 1)) { lr_swap = ((int)v == 1); TOUCH(); }
+  }
+  else if (cmdIs(cmd, "dup:")) {
+    // Без TOUCH намеренно: диагностический режим не должен пережить
+    // перезагрузку. Забытый dup опаснее забытого swap — после перезагрузки
+    // плата продолжила бы сливать обе пары полос в один разъём.
+    if (safeCmdVal(cmd, v, 0, 1)) { dup_out = ((int)v == 1); scheduleFilterUpdate(); }
   }
   else if (strncmp(cmd, "chhp:", 5) == 0 || strncmp(cmd, "chlp:", 5) == 0) {
     bool is_hp = (cmd[2] == 'h');
@@ -1146,7 +1267,7 @@ void dispatchCommand(const char *cmd) {
     if (q && parseFloat(q + 1, fv, 0, MAX_DELAY_SAMPLES)) { ch_delay[ch] = (uint16_t)fv; TOUCH(); }
   }
   else if (cmdIs(cmd, "tvol:")) {
-    if (safeCmdVal(cmd, v, 0, 100)) {
+    if (safeCmdVal(cmd, v, 0, (int)(TEST_VOL_MAX * 100.0f))) {
       test_vol.store(v / 100.0f);
       paramsDirty = true; paramsChangedAt = millis();
       say("Test volume: " + String((int)v) + "%");
@@ -1160,34 +1281,43 @@ void dispatchCommand(const char *cmd) {
   else if (strcmp(cmd, "next")  == 0) { if (a2dp_sink.is_avrc_connected()) a2dp_sink.next(); }
   else if (strcmp(cmd, "prev")  == 0) { if (a2dp_sink.is_avrc_connected()) a2dp_sink.previous(); }
   else if (cmdIs(cmd, "test:")) {
-    uint8_t tm = 0;
-    if      (cmdArgIs(cmd, "off"))   tm = 0;
-    else if (cmdArgIs(cmd, "all"))   tm = 1;
-    else if (cmdArgIs(cmd, "l"))     tm = 2;
-    else if (cmdArgIs(cmd, "r"))     tm = 3;
-    else if (cmdArgIs(cmd, "woof"))  tm = 4;
-    else if (cmdArgIs(cmd, "tweet")) tm = 5;
-    else if (cmdArgIs(cmd, "1"))     tm = 6;
-    else if (cmdArgIs(cmd, "2"))     tm = 7;
-    else if (cmdArgIs(cmd, "3"))     tm = 8;
-    else if (cmdArgIs(cmd, "4"))     tm = 9;
-    else if (cmdArgIs(cmd, "anti"))  tm = 10;
-    else if (cmdArgIs(cmd, "sweep")) tm = 11;
-    test_mode.store(tm);
-    ring_flush.store(true);
-    say("Test mode: " + String(tm));
+    const char *arg = strchr(cmd, ':');
+    uint8_t tm = 255;
+    if (arg) {
+      arg++;
+      if      (strcmp(arg, "off")   == 0) tm = 0;
+      else if (strcmp(arg, "all")   == 0) tm = 1;
+      else if (strcmp(arg, "l")     == 0) tm = 2;
+      else if (strcmp(arg, "r")     == 0) tm = 3;
+      else if (strcmp(arg, "woof")  == 0) tm = 4;
+      else if (strcmp(arg, "tweet") == 0) tm = 5;
+      else if (strcmp(arg, "1")     == 0) tm = 6;
+      else if (strcmp(arg, "2")     == 0) tm = 7;
+      else if (strcmp(arg, "3")     == 0) tm = 8;
+      else if (strcmp(arg, "4")     == 0) tm = 9;
+      else if (strcmp(arg, "anti")  == 0) tm = 10;
+      else if (strcmp(arg, "sweep") == 0) tm = 11;
+    }
+    if (tm == 255) {
+      say("ERROR: unknown test mode. Use: off, all, l, r, woof, tweet, 1..4, anti, sweep");
+    } else {
+      test_mode.store(tm);
+      ring_flush.store(true);
+      say("Test mode: " + String(tm));
+    }
   }
   else if (cmdIs(cmd, "tf:")) {
     if (safeCmdVal(cmd, v, 20, 20000)) test_freq.store(v);
   }
   else if (strcmp(cmd, "status") == 0) {
-    say("V0=" + String((int)(vol_z[0]*100)) + "% V1=" + String((int)(vol_z[1]*100)) + "% bal=" + String(bal));
+    say("V0=" + String((int)(vol_z[0]*100)) + "% V1=" + String((int)(vol_z[1]*100)) + "% bal=" + String(bal, 2));
     say("Fc=" + String((int)fc_hz) + "Hz hp=" + String((int)sub_hz) + "Hz sub=" + String(sub_on ? "ON" : "OFF"));
     say("XO: " + String(xo_type == 2 ? "LR4" : "Butter") + (xo_on ? " ON" : " OFF"));
-    say("TLF=" + String(tlf_db) + "dB THF=" + String(thf_db) + "dB");
-    say("EQ: L=" + String(eq_db[0]) + " M=" + String(eq_db[1]) + " H=" + String(eq_db[2]));
-    String inv = String(inv_ch[0]?1:0) + String(inv_ch[1]?1:0) + String(inv_ch[2]?1:0) + String(inv_ch[3]?1:0);
-    say("INV: " + inv);
+    say("TLF=" + String(tlf_db, 2) + "dB THF=" + String(thf_db, 2) + "dB");
+    say("EQ: L=" + String(eq_db[0], 2) + " M=" + String(eq_db[1], 2) + " H=" + String(eq_db[2], 2));
+    say("Mute: " + String(muted_z[0] ? 1 : 0) + "/" + String(muted_z[1] ? 1 : 0));
+    say(String("SWP: ") + String(lr_swap ? 1 : 0));
+    say(String("DUP: ") + String(dup_out ? "1 (z2 == z1, каналы 2,3 не выводятся)" : "0"));
     say(String("BT: ") + String(bt_connected.load() ? "ON" : "OFF") + " | SPP: " + String(SerialBT.hasClient() ? "ON" : "OFF"));
     say(String("Src: ") + String(src_48k.load() ? "48" : "44.1") + " kHz");
     say("Test: " + String(test_mode.load()) + " TVol=" + String((int)(test_vol.load()*100)) + "%");
@@ -1203,17 +1333,24 @@ void dispatchCommand(const char *cmd) {
     // начало отсчёта. Поэтому сравниваем размах выхода на границах потока
     // с размахом обычного сигнала — щелчок это размах сигнала, взятый
     // в момент, когда сигнала быть не должно.
-    uint32_t lvl = click_level ? click_level : 1;
-    float start_db = 20.0f * log10f((float)(click_start_max[0] ? click_start_max[0] : 1) / 32768.0f);
-    float fade_db  = 20.0f * log10f((float)(click_fade_max[0] ? click_fade_max[0] : 1) / 32768.0f);
+    // click_* пишутся из audioTask, читаются здесь (loopTask) — берём снимок под click_mux.
+    uint32_t csm0, csm1, cfm0, cfm1, cl;
+    portENTER_CRITICAL(&click_mux);
+    csm0 = click_start_max[0]; csm1 = click_start_max[1];
+    cfm0 = click_fade_max[0]; cfm1 = click_fade_max[1];
+    cl = click_level;
+    portEXIT_CRITICAL(&click_mux);
+    uint32_t lvl = cl ? cl : 1;
+    float start_db = 20.0f * log10f((float)(csm0 ? csm0 : 1) / 32768.0f);
+    float fade_db  = 20.0f * log10f((float)(cfm0 ? cfm0 : 1) / 32768.0f);
     float lvl_db   = 20.0f * log10f((float)lvl / 32768.0f);
-    say("Signal level: " + String(click_level) + " (" + String(lvl_db, 1) + " dBFS)");
-    say("Start max: " + String(click_start_max[0]) + "/" + String(click_start_max[1])
+    say("Signal level: " + String(cl) + " (" + String(lvl_db, 1) + " dBFS)");
+    say("Start max: " + String(csm0) + "/" + String(csm1)
         + " (" + String(start_db, 1) + " dBFS)");
-    say("Fade end max: " + String(click_fade_max[0]) + "/" + String(click_fade_max[1])
+    say("Fade end max: " + String(cfm0) + "/" + String(cfm1)
         + " (" + String(fade_db, 1) + " dBFS)");
-    say("Start rel: " + String((int)(100.0f * click_start_max[0] / lvl)) + "%  Fade rel: "
-        + String((int)(100.0f * click_fade_max[0] / lvl)) + "%");
+    say("Start rel: " + String((int)(100.0f * csm0 / lvl)) + "%  Fade rel: "
+        + String((int)(100.0f * cfm0 / lvl)) + "%");
     say("Click window: " + String(click_probe_armed.load() ? "measuring" : "idle"));
   }
   else if (strcmp(cmd, "stats") == 0) {
@@ -1221,7 +1358,7 @@ void dispatchCommand(const char *cmd) {
     say("Blocks: " + String(audio_blocks.load()) + " AF: " + String(audio_frames.load()) +
         " Idle: " + String(audio_idle.load()));
     say("Underrun: Z1=" + String(und_z[0].load()) + " Z2=" + String(und_z[1].load()));
-    say("RingDrops: " + String(ring_drops.load()) + " BadSamples: " + String(st_errors.load()));
+    say("RingDrops: " + String(ring_drops.load()) + " SelfTestErr: " + String(st_errors.load()));
     say("Clips: " + String(clip_cnt[0].load()) + "/" + String(clip_cnt[1].load()) +
         "/" + String(clip_cnt[2].load()) + "/" + String(clip_cnt[3].load()));
     say("Starve: n=" + String(starve_cnt.load()) + " max=" + String(starve_max_ms.load()) + "ms");
@@ -1235,28 +1372,41 @@ void dispatchCommand(const char *cmd) {
   }
   else if (strcmp(cmd, "heap") == 0) say("Free heap: " + String(ESP.getFreeHeap()));
   else if (strcmp(cmd, "save") == 0)   { saveAllParams(); paramsDirty = false; say(F("Saved")); }
-  else if (strcmp(cmd, "reboot") == 0) { say(F("Rebooting...")); delay(500); ESP.restart(); }
-  else if (strcmp(cmd, "factory") == 0){ prefs.clear(); say(F("Factory reset")); delay(500); ESP.restart(); }
+  else if (cmdIs(cmd, "reboot")) {
+    if (from_spp && !cmdArgIs(cmd, "ok")) {
+      say(F("ERROR: reboot requires confirmation via SPP. Use 'reboot:ok'"));
+    } else {
+      say(F("Rebooting...")); delay(500); ESP.restart();
+    }
+  }
+  else if (cmdIs(cmd, "factory")) {
+    if (from_spp && !cmdArgIs(cmd, "ok")) {
+      say(F("ERROR: factory reset requires confirmation via SPP. Use 'factory:ok'"));
+    } else {
+      prefs.clear(); say(F("Factory reset")); delay(500); ESP.restart();
+    }
+  }
   else if (strcmp(cmd, "help") == 0) {
-    say(F("vol:N v0:N v1:N bal:N mute:N"));
+    say(F("vol:N v0:N v1:N bal:N mute:N[:V] (V=0|1 absolute, v35.1)"));
     say(F("fc:N hp:N sub:0/1 xo:0/1 xotype:1-2 tlf:N thf:N"));
     say(F("eql:N eqm:N eqh:N preset:0-3"));
-    say(F("inv:0-3 inv:off"));
+    say(F("swap:0/1 (swap L/R outputs)"));
+    say(F("dup:0/1 (same block to both z1 and z2, diag only)"));
     say(F("chhp:C:F chlp:C:F delayC:N"));
-    say(F("tvol:N (test volume, default 6%)"));
+    say(F("tvol:N (test volume, default 4%, max 6%)"));
     say(F("play pause next prev"));
     say(F("test:all/l/r/woof/tweet/1-4/anti/sweep/off tf:N"));
     say(F("status stats click evlog heap"));
-    say(F("save reboot factory"));
+    say(F("save reboot[:ok] factory[:ok] (:ok required via SPP)"));
   }
   ui_dirty.store(true);
 }
 
 void handleSerial() {
   const char *c1 = pollLine(Serial, cmd_buf_usb, cmd_len_usb, skip_usb);
-  if (c1) dispatchCommand(c1);
+  if (c1) dispatchCommand(c1, false);  // false = USB (local)
   const char *c2 = pollLine(SerialBT, cmd_buf_bt, cmd_len_bt, skip_bt);
-  if (c2) dispatchCommand(c2);
+  if (c2) dispatchCommand(c2, true);   // true = SPP (remote)
 }
 
 // ===================== OLED ============================================
@@ -1267,6 +1417,15 @@ void updateGeneralDisplay() {
   bool bt = bt_connected.load();
   bool play = is_playing.load();
   bool spp = SerialBT.hasClient();
+  // Громкость на OLED общая: два числа занимали обе нижние строки экрана и
+  // читались как отдельные каналы, хотя разъёмов у усилителя два стерео-входа,
+  // а слышно на выходе одно поле. Общее — среднее уровней; если каналы
+  // разошлись (bal), рядом ставится звёздочка: значит это не точное значение
+  // ни одного из них, и без неё показано было бы то, чего на самом деле нет.
+  float v0 = vol_z[0], v1 = vol_z[1];
+  int vavg = (int)(((v0 + v1) * 50.0f) + 0.5f);
+  if (vavg > 100) vavg = 100;
+  bool split = fabsf(v0 - v1) > 0.005f;
   disp.clearDisplay();
   disp.setTextSize(2); disp.setTextColor(SSD1306_WHITE);
   disp.setCursor(0, 0); disp.print(bt ? F("BT ON") : F("BT --"));
@@ -1275,16 +1434,19 @@ void updateGeneralDisplay() {
   if (muted_z[0] && muted_z[1]) disp.print(F("MUTED"));
   else disp.print(play ? F("PLAY") : F("PAUSE"));
   disp.setCursor(0, 32);
-  disp.print(F("L ")); disp.setCursor(28, 32); disp.print((int)(vol_z[0]*100)); disp.print(F("%"));
-  disp.setCursor(0, 48);
-  disp.print(F("R ")); disp.setCursor(28, 48); disp.print((int)(vol_z[1]*100)); disp.print(F("%"));
+  disp.print(F("VOL")); disp.setCursor(52, 32);
+  disp.print(vavg); disp.print(F("%"));
+  if (split) disp.print(F("*"));
+  // Баланс без громкости не показать: на OLED осталась свободная строка,
+  // и молчаливое место читалось бы как «баланс = 0».
+  if (split) { disp.setCursor(0, 48); disp.print(F("BAL")); disp.setCursor(52, 48); disp.print((int)(bal * 100.0f)); }
   disp.display();
 }
 
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v34 (dsp reset, fade out, click probe)"));
+  Serial.println(F("\n\nboot: bi-amp v35 (lr swap instead of phase inversion)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 
@@ -1295,7 +1457,18 @@ void setup() {
     applyBlob(b);
     xo_on = (b.xoon != 0);
     sanitizeParams();
-    Serial.println(F("NVS: blob loaded (v22)"));
+    Serial.println(F("NVS: blob loaded (v23)"));
+  } else if (got == sizeof(b) && b.version == 22) {
+    // Блоб v22 отличается только названием байта invm → swp, размер и
+    // смещения те же. Перестановка Л/П на этом месте была нулём, поэтому
+    // её значение не восстанавливаем: старый invm относился к инверсии
+    // фазы, и переносить его в swap было бы неверно.
+    applyBlob(b);
+    xo_on = (b.xoon != 0);
+    lr_swap = false;
+    sanitizeParams();
+    saveAllParams();
+    Serial.println(F("NVS: blob migrated v22 -> v23"));
   } else if (got == sizeof(b) - 1 && b.version == 21) {
     // Блоб v21 — та же упакованная структура без последнего байта xoon.
     // Структура дописана в конец, поэтому прежние поля лежат на тех же
@@ -1304,9 +1477,10 @@ void setup() {
     // все настройки, потому что saveAllParams пишет только ключ blob.
     applyBlob(b);
     xo_on = true;
+    lr_swap = false;
     sanitizeParams();
     saveAllParams();
-    Serial.println(F("NVS: blob migrated v21 -> v22"));
+    Serial.println(F("NVS: blob migrated v21 -> v23"));
   } else {
     for (uint8_t c = 0; c < 2; c++) {
       char kv[4] = {'v', (char)('0'+c), 0, 0};
@@ -1320,9 +1494,8 @@ void setup() {
     eq_db[0] = prefs.getFloat("eql", 0); eq_db[1] = prefs.getFloat("eqm", 0); eq_db[2] = prefs.getFloat("eqh", 0);
     bal = prefs.getFloat("bal", 0);
     xo_type = prefs.getUChar("xot", 1);
-    { float tv = prefs.getFloat("tvol", 0.06f); test_vol.store(tv); }
-    uint8_t inv_mask = prefs.getUChar("invm", 0);
-    for (uint8_t c = 0; c < 4; c++) inv_ch[c] = (inv_mask >> c) & 1;
+    { float tv = prefs.getFloat("tvol", TEST_VOL_DEFAULT); test_vol.store(tv); }
+    lr_swap = prefs.getBool("swp", false);
     for (uint8_t c = 0; c < 4; c++) {
       char kh[4] = {'c', (char)('0'+c), 'h', 0};
       char kl[4] = {'c', (char)('0'+c), 'l', 0};
@@ -1332,7 +1505,7 @@ void setup() {
     }
     sanitizeParams();
     saveAllParams();
-    Serial.println(F("NVS: legacy migrated to v22"));
+    Serial.println(F("NVS: legacy migrated to v23"));
   }
   scheduleFilterUpdate();
 
@@ -1388,6 +1561,10 @@ void loop() {
     if (p > 50) logEvent(6, (uint16_t)min(p, 65000ul));
   }
   prev_loop_ms = now;
+  // loop_max_ms может показывать до ~176 мс (наблюдалось), если say() блокируется на
+  // SerialBT.println() при заполненном буфере SPP. say() теперь проверяет
+  // availableForWrite(), но кратковременные задержки I2C (OLED) или NVS тоже возможны.
+  // audioTask (core 1, prio 6) не затрагивается: loop работает на core 0 с prio 1.
 
   handleSerial();
 
