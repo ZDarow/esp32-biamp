@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -11,34 +11,8 @@ from .client import BiAmpClient
 from .transport import TransportError, list_serial_ports
 
 PROFILES_DIR = Path.home() / ".biamp" / "profiles"
-
-
-def _state_from_dict(data: dict) -> p.DeviceState:
-    filters = tuple(
-        p.ChannelFilter(int(f.get("high_pass_hz", 0)), int(f.get("low_pass_hz", 0)))
-        for f in data.get("filters", [])
-    )
-    filters = filters + tuple(
-        p.ChannelFilter() for _ in range(p.CHANNEL_COUNT - len(filters))
-    )
-    return p.DeviceState(
-        vol0=int(data.get("vol0", 10)),
-        vol1=int(data.get("vol1", 10)),
-        balance=float(data.get("balance", 0.0)),
-        crossover_hz=float(data.get("crossover_hz", 400.0)),
-        sub_hp_hz=float(data.get("sub_hp_hz", 45.0)),
-        sub_on=bool(data.get("sub_on", True)),
-        tilt_low_db=float(data.get("tilt_low_db", 0.0)),
-        tilt_high_db=float(data.get("tilt_high_db", -1.0)),
-        eq_low_db=float(data.get("eq_low_db", 0.0)),
-        eq_mid_db=float(data.get("eq_mid_db", 0.0)),
-        eq_high_db=float(data.get("eq_high_db", 0.0)),
-        inverted=tuple(bool(x) for x in data.get("inverted", [False] * 4)),
-        test_volume=int(data.get("test_volume", 6)),
-        crossover_type=int(data.get("crossover_type", 1)),
-        delays=tuple(int(x) for x in data.get("delays", [0, 0, 0, 0])),
-        filters=filters[: p.CHANNEL_COUNT],
-    )
+_PORT_RE = re.compile(r"^(tcp://[A-Za-z0-9\.\-]+:\d+|[A-Za-z0-9_\-]+)$")
+_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
 
 def _print_state(state: p.DeviceState) -> None:
@@ -50,28 +24,33 @@ def _print_state(state: p.DeviceState) -> None:
     )
     print(f"Тримы       : НЧ {state.tilt_low_db:+g} дБ  ВЧ {state.tilt_high_db:+g} дБ")
     print(
-        f"Эквалайзер  : 120 Гц {state.eq_low_db:+g}  1кГц {state.eq_mid_db:+g}  "
-        f"6кГц {state.eq_high_db:+g} дБ"
+        f"Эквалайзер  : 120 Гц {state.eq_low_db:+g}  1кГц {state.eq_mid_db:+g}  6кГц {state.eq_high_db:+g} дБ"
     )
-    inv = ",".join(str(int(x)) for x in state.inverted)
-    print(f"Инверсия    : {inv}")
+    print(
+        f"Mute        : зона0={'ON' if state.muted_z0 else 'OFF'}  зона1={'ON' if state.muted_z1 else 'OFF'}"
+    )
+    print(f"XO          : {'вкл' if state.xo_on else 'выкл'}")
+    print(f"LR swap     : {'вкл' if state.lr_swap else 'выкл'}")
+    print(f"DUP out     : {'вкл' if state.dup_out else 'выкл'}")
     print(f"Задержки    : {'/'.join(str(d) for d in state.delays)} отсч.")
     for index, filt in enumerate(state.filters):
-        print(
-            f"  канал {index} ({p.CHANNELS[index]:<10}) "
-            f"HP={filt.high_pass_hz:<6} LP={filt.low_pass_hz}"
-        )
+        print(f"  канал {index} ({p.CHANNELS[index]:<10}) HP={filt.high_pass_hz:<6} LP={filt.low_pass_hz}")
     print(
         f"Связь       : BT {'ON' if state.bt_audio_on else 'OFF'}  "
         f"SPP {'ON' if state.spp_on else 'OFF'}  источник {state.source_khz} кГц"
     )
-    print(
-        f"Тест        : режим {state.test_mode}  громкость {state.test_volume}%"
-    )
+    print(f"Тест        : режим {state.test_mode}  громкость {state.test_volume}%")
 
 
 def _profile_path(name: str) -> Path:
+    if not _NAME_RE.match(name):
+        raise TransportError(f"имя профиля {name!r} недопустимо: только буквы, цифры, «-» и «_», длина 1..64")
     return PROFILES_DIR / f"{name}.json"
+
+
+def _validate_port(port: str) -> None:
+    if not _PORT_RE.match(port):
+        raise TransportError(f"формат порта {port!r} некорректен: ожидается COM-порт или tcp://хост:порт")
 
 
 def _save_profile(name: str, state: p.DeviceState) -> None:
@@ -86,13 +65,11 @@ def _load_profile(name: str) -> p.DeviceState:
     path = _profile_path(name)
     if not path.exists():
         raise TransportError(f"профиль не найден: {path}")
-    return _state_from_dict(json.loads(path.read_text(encoding="utf-8")))
+    return p.state_from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="biamp", description="Управление усилителем ESP32 Bi-Amp с ПК"
-    )
+    parser = argparse.ArgumentParser(prog="biamp", description="Управление усилителем ESP32 Bi-Amp с ПК")
     parser.add_argument("--port", default="COM14", help="COM-порт или tcp://хост:порт")
     sub = parser.add_subparsers(dest="action", required=True)
 
@@ -140,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        _validate_port(args.port)
+    except TransportError as exc:
+        print(f"ошибка: {exc}", file=sys.stderr)
+        return 2
+
+    try:
         with BiAmpClient.open(args.port) as client:
             print(f"[{client.description}]")
             if args.action == "status":
@@ -179,4 +162,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
