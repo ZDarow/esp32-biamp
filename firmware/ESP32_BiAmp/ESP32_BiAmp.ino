@@ -1028,13 +1028,32 @@ void on_sample_rate(uint16_t rate) {
   }
 }
 
+// Выдать строку в USB-порт и, если телефон подключён, в SPP.
+//
+// Про `availableForWrite()` здесь важно: BluetoothSerial в ядре ESP32 3.x
+// этого метода НЕ переопределяет, а базовый Print::availableForWrite()
+// возвращает 0. Проверка «свободно ли место в буфере» таким вызовом всегда
+// даёт false, то есть гейт `hasClient() && availableForWrite() > 0`
+// молча отключает всю выдачу в SPP: телефон шлёт команды, плата на них
+// отвечает в порт, а приложение не получает ни одной строки. Место в буфере
+// вместо этого проверяется по факту: println возвращает, сколько байт
+// BluetoothSerial принял на самом деле.
 void say(const String &s) {
   Serial.println(s);
-  if (SerialBT.hasClient() && SerialBT.availableForWrite() > 0) SerialBT.println(s);
+  if (!SerialBT.hasClient()) return;
+  size_t sent = SerialBT.print(s);
+  sent += SerialBT.println();
+  if (sent < s.length() + 2) {
+    Serial.println(F("SPP: строка обрезана, буфер переполнен"));
+  }
 }
 void say(const __FlashStringHelper *s) {
   Serial.println(s);
-  if (SerialBT.hasClient() && SerialBT.availableForWrite() > 0) SerialBT.println(s);
+  if (!SerialBT.hasClient()) return;
+  if (SerialBT.print(s) == 0) {
+    Serial.println(F("SPP: строка не отправлена, буфер переполнен"));
+  }
+  SerialBT.println();
 }
 
 // ===================== NVS =============================================
