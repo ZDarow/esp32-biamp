@@ -55,6 +55,14 @@ internal fun Modifier.semanticsMerge(name: String?, state: String?): Modifier =
  * Зазор между ползунком и краями/соседними элементами — 8 dp.
  * Тап по треку — установка значения, перетаскивание — плавное изменение.
  * Основан на стандартном Material3 Slider с уменьшенной высотой.
+ *
+ * Собственного состояния здесь нет намеренно: значение приходит сверху, и
+ * раньше ползунок держал ещё одну копию в `mutableFloatStateOf` с
+ * `LaunchedEffect` поверх копии вызывающего. Три зеркала одного числа в
+ * цепочке `deviceState → state → pos` означали, что правка ползунка
+ * доезжала до отправки через две асинхронные ступени, а `Slider` получал
+ * значение, отстающее от того, что нарисовал. Теперь единственная точка
+ * состояния — у вызывающего, а этот компонент её только отображает.
  */
 @Composable
 fun CompactSlider(
@@ -68,12 +76,9 @@ fun CompactSlider(
     stateDescriptionText: String? = null,
     modifier: Modifier = Modifier
 ) {
-    var pos by remember { mutableFloatStateOf(value) }
-    LaunchedEffect(value) { pos = value }
-
     Slider(
-        value = pos,
-        onValueChange = { pos = it; onValueChange(it) },
+        value = value,
+        onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
         valueRange = valueRange,
         steps = steps,

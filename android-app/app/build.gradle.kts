@@ -18,32 +18,25 @@ val signKeyPass = providers.gradleProperty("biampKeyPassword").orNull
 val hasSigning = listOf(signStoreFile, signStorePass, signKeyAlias, signKeyPass)
     .all { !it.isNullOrBlank() }
 
-// Идентификаторы проверок пакета androidx.compose.runtime.lint.
-//
-// Все они разбирают тело композабла, а детекторы собраны против Kotlin
-// Analysis API K1, тогда как проект собирается на K2 (Kotlin 2.0.21).
-// На этой связке они падают с IncompatibleClassChangeError, и падение
-// целиком роняет lintAnalyzeDebug. Список взят не «на глаз», а вытащен
-// из lint.jar compose runtime 1.9.1 (по одному Detector-классу на проверку).
-val COMPOSE_RUNTIME_LINT_IDS = setOf(
+/**
+ * Проверки lint, падающие на Kotlin 2 (K2) в связке с lint 31.7.3 из AGP 8.7.3.
+ *
+ * Каждая из них разбирает тело композабла через Kotlin Analysis API K1,
+ * тогда как проект собирается на K2. Падение — `IncompatibleClassChangeError`
+ * («Found class KaSimpleVariableAccessCall, but interface was expected»),
+ * и оно роняет lintAnalyzeDebug целиком, то есть вместе со ВСЕЙ остальной
+ * статикой.
+ *
+ * Список не выдуман: каждый идентификатор добавлен после того, как lint сам
+ * назвал падающий детектор («The crash seems to involve the detector …»).
+ * Проверки, которые на этом коде не падают, в списке НЕ стоят и работают
+ * штатно — в том числе UnrememberedState, UnrememberedMutableState и
+ * AutoboxingStateCreation: именно они ловят потерянное состояние в
+ * композаблах, а до правок состояние слайдеров дублировалось трижды.
+ */
+val K2_CRASHING_LINT_IDS = listOf(
     "AutoboxingStateCreation",
-    "AutoboxingStateValueProperty",
-    "ComposableLambdaParameterNaming",
-    "ComposableLambdaParameterPosition",
-    "ComposableNaming",
-    "CompositionLocalNaming",
-    "CoroutineCreationDuringComposition",
-    "FlowOperatorInvokedInComposition",
-    "FrequentlyChangedStateReadInComposition",
-    "MutableCollectionMutableState",
-    "OpaqueUnitKey",
-    "ProduceStateDoesNotAssignValue",
-    "RememberInComposition",
-    "RememberReturnType",
-    "StateFlowValueCalledInComposition",
-    "UnrememberedMutableState",
-    "UnrememberedState",
-    "UnrememberedStateCreation"
+    "RememberInComposition"      // getterOrSuperDeclarationsHaveAnnotation
 )
 
 android {
@@ -56,6 +49,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        // Раннер для instrumented-тестов: без него androidTest не запустится.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -81,31 +76,28 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
 
     lint {
-        // Детекторы androidx.lifecycle и androidx.compose слинкованы против
-        // интерфейсов Kotlin Analysis API K1, а проект собирается на K2
-        // (Kotlin 2.0.21). На этой связке они падают с IncompatibleClassChangeError
-        // («Found class KaCallableMemberCall, but interface was expected»),
-        // и падение целиком роняет lintAnalyzeDebug и lintVitalAnalyzeRelease.
-        // Воспроизводится и на чистом HEAD без локальных правок, то есть это
-        // баг детекторов и версии lint (31.7.3 в составе AGP 8.7.3),
-        // а не дефект кода. Отключаем ровно эти проверки — остальной
-        // статический анализ продолжает работать.
+        // Детекторы androidx.lifecycle (NullSafeMutableLiveData,
+        // FrequentlyChangingValue) разобраны против интерфейсов Kotlin
+        // Analysis API K1 и падают так же, как перечисленные выше.
         disable += "NullSafeMutableLiveData"
         disable += "FrequentlyChangingValue"
-
-        // Тот же класс детекторов из androidx.compose.runtime.lint: они
-        // разбирают тело композабла и падают на K2 по очереди, один за другим.
-        // Первый упавший — RememberInCompositionDetector
-        // («Found class KaSimpleVariableAccessCall, but interface was expected»).
-        // Список закрывает весь пакет compose.runtime.lint, иначе после каждого
-        // отключения падал бы следующий детектор по цепочке.
-        disable += COMPOSE_RUNTIME_LINT_IDS
+        disable += K2_CRASHING_LINT_IDS
     }
 }
+
+/**
+ * JDK для компиляции Kotlin.
+ *
+ * Раньше ставился только `kotlinOptions.jvmTarget = "17"`: это задавало
+ * байткод, но не инструмент компиляции, и Kotlin/JVM-часть собиралась тем
+ * же JDK, на котором запущен Gradle. Расхождение выдавало себя странными
+ * ошибками в других модулях. `jvmToolchain(17)` задаёт и то, и другое, и
+ * `compileOptions` выше остаётся, потому что отвечает за Java-часть.
+ */
+kotlin { jvmToolchain(17) }
 
 dependencies {
     // BOM 2025.09.00 — последняя версия compose-bom, приносящая Material3 1.4.0 (стабильный)
@@ -127,4 +119,19 @@ dependencies {
     // Виртуальное время для тестов очереди команд: окно троттлинга в 150 мс
     // иначе проверялось бы по скорости машины.
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+
+    // ── Instrumented-тесты (androidTest) ──────────────────────────
+    // Их смысл — проверить то, чего не видит юнит-тест: поведение ViewModel
+    // и композаблов на настоящем Android-рантайме с реальными SharedPreferences,
+    // с реальными потоками и реальным тактильным вводом. Сопряжённый ESP32
+    // для них не нужен: соединение подменяется заглушкой SppClient.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    // Compose-тесты на реальном устройстве: ищут узлы по подписям и жмут их.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // Тестовые зависимости попадают и в отладочный APK — без activity
+    // из ui-test-manifest не запускается пустая ComponentActivity.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

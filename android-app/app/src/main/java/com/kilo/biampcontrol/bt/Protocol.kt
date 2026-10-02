@@ -3,7 +3,7 @@
  *
  * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
  * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Формат команд и ответов — в firmware/protocol/status-contract.md, раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -23,6 +23,49 @@
 
 package com.kilo.biampcontrol.bt
 
+/**
+ * Диапазоны значений протокола — раздел 4 status-contract.md.
+ *
+ * Держим их в одном месте, потому что используют их три независимых места:
+ * санитайзер [StatusParser], подписи слайдеров и проверка команд перед
+ * отправкой. Расхождение между ними и есть тот самый «250 % в подписи при
+ * ползунке до 100 %», который чинится одним списком.
+ */
+object Limits {
+    const val VOL_MIN = 0f
+    const val VOL_MAX = 100f
+    const val BAL_MIN = -10f
+    const val BAL_MAX = 10f
+    const val FC_MIN = 200f
+    const val FC_MAX = 1000f
+    const val HP_MIN = 20f
+    const val HP_MAX = 80f
+    const val TRIM_MIN = -6f
+    const val TRIM_MAX = 3f
+    const val EQ_MIN = -12f
+    const val EQ_MAX = 12f
+    const val DELAY_MIN = 0
+    const val DELAY_MAX = 220
+    const val CH_FILTER_MIN = 20
+    const val CH_FILTER_MAX = 20000
+    const val TEST_VOL_MIN = 0
+    const val TEST_VOL_MAX = 6
+    const val TEST_MODE_MIN = 0
+    const val TEST_MODE_MAX = 4
+    const val XO_TYPE_MIN = 1
+    const val XO_TYPE_MAX = 2
+
+    /**
+     * Длина команды: прошивка отбрасывает строки длиннее 62 байт UTF-8
+     * (раздел 4 контракта). Разрешённые символы ASCII, поэтому символы и
+     * байты совпадают и одного ограничения по длине достаточно.
+     */
+    const val CMD_MAX_CHARS = 62
+
+    /** Символы, допустимые в команде: имя, двоеточие, точка, дефис. */
+    val CMD_ALLOWED = Regex("[A-Za-z0-9:_.-]")
+}
+
 /** Состояние устройства, распарсенное из ответа `status`. */
 data class DeviceState(
     val vol0: Int = 10,
@@ -36,7 +79,12 @@ data class DeviceState(
     val eql: Float = 0f,
     val eqm: Float = 0f,
     val eqh: Float = 0f,
-val inv: List<Boolean> = listOf(false, false, false, false),
+// Прошивка v35.1 вместо инверсии фазы присылает перестановку Л/П и
+    // дублирование выходов. Старые прошивки присылали "INV: 0100", этой
+    // строки в контракте больше нет вовсе.
+    val swapped: Boolean = false,                // "SWP:" — перестановка Л/П
+    val dup: Boolean = false,                    // "DUP:" — каналы 2,3 не выводятся
+    val muted: List<Boolean> = listOf(false, false), // "Mute: z0/z1" — зоны 0 и 1
     val btAudioOn: Boolean = false,
     val sppOn: Boolean = false,
     val testMode: Int = 0,
@@ -48,12 +96,42 @@ val inv: List<Boolean> = listOf(false, false, false, false),
     val chFilters: List<Pair<Int, Int>> = listOf(0 to 0, 0 to 0, 0 to 0, 0 to 0) // (hp, lp) для ch0..ch3
 )
 
+/**
+ * Санитайзер команды перед отправкой в SPP.
+ *
+ * Прошивка исполняет присланную строку как команду, поэтому символ перевода
+ * строки внутри неё отправлял бы сразу несколько команд. Здесь строка
+ * приводится к алфавиту `[A-Za-z0-9:_.-]` и обрезается до [Limits.CMD_MAX_CHARS].
+ */
+object CommandSanitizer {
+    /** Чистая команда для отправки либо `null`, если после отсечения нечего слать. */
+    fun sanitize(raw: String): String? =
+        raw.trim()
+            .filter { Limits.CMD_ALLOWED.matches(it.toString()) }
+            .take(Limits.CMD_MAX_CHARS)
+            .ifEmpty { null }
+}
+
+/** Результат разбора: состояние плюс строки, которые парсер не узнал. */
+data class ParseResult(
+    val state: DeviceState?,
+    /** Строки блока, не совпавшие ни с одним шаблоном `status`. */
+    val unrecognized: List<String>
+) {
+    /** Сколько строк потеряно: контракт требует, чтобы это число было нулём. */
+    val unrecognizedCount: Int get() = unrecognized.size
+}
+
 object StatusParser {
     private val reVol  = Regex("V0=(\\d+)%\\s+V1=(\\d+)%\\s+bal=(-?[\\d.]+)")
     private val reFc   = Regex("Fc=([\\d.]+)Hz\\s+hp=([\\d.]+)Hz\\s+sub=(ON|OFF)")
     private val reTrim = Regex("TLF=(-?[\\d.]+)dB\\s+THF=(-?[\\d.]+)dB")
     private val reEq   = Regex("EQ:\\s*L=(-?[\\d.]+)\\s+M=(-?[\\d.]+)\\s+H=(-?[\\d.]+)")
-    private val reInv  = Regex("INV:\\s+([01]{4})")
+// v35.1: "Mute: 0/1" — абсолютное состояние зон, по нему же клиент шлёт mute:<z>:<0|1>
+    private val reMute = Regex("Mute:\\s*([01])/([01])")
+    // "SWP: N" и "DUP: N" приходят всегда, даже когда значения нулевые
+    private val reSwp  = Regex("SWP:\\s*([01])")
+    private val reDup  = Regex("DUP:\\s*([01])")
     // ИСПРАВЛЕНО: парсит "BT: ON | SPP: ON" или "BT: ON"
     private val reBt   = Regex("BT:\\s+(ON|OFF)(?:\\s*\\|\\s*SPP:\\s+(ON|OFF))?")
     // "Test: 0 TVol=6%" — v29 добавил громкость тест-сигнала в ту же строку
@@ -68,13 +146,28 @@ object StatusParser {
     private val reDly  = Regex("Delay:\\s+(\\d+)/(\\d+)/(\\d+)/(\\d+)")
 
     /**
+     * Шаблоны строк блока `status` — по ним же строка причисляется к блоку.
+     *
+     * Список задан явно, а не выводится из `object`: он одновременно служит
+     * фильтром «это строка статуса, а не вывод `help`/`stats`/`heap`» и
+     * источником строк для контрактного теста. Добавление новой строки в
+     * контракт обязано добавлять её и сюда, иначе тест упадёт.
+     */
+    private val allLinePatterns = listOf(
+        reVol, reFc, reTrim, reEq, reMute, reSwp, reDup, reBt, reTest, reSrc, reXo, reChf, reDly
+    )
+
+    /**
      * Признак последней строки блока `status`. Прошивка выдаёт блок через `say()`,
      * и строка `Delay:` замыкает его. По ней вызывающий код понимает, что блок
      * принят целиком, и может очистить буфер строк.
      */
     fun isBlockEnd(line: String): Boolean = reDly.containsMatchIn(line)
 
-/** Терпимый парсер: собирает состояние из любых подходящих строк буфера. */
+    /** Строка принадлежит блоку `status` (любой из 13 строк контракта). */
+    fun isStatusLine(line: String): Boolean = allLinePatterns.any { it.containsMatchIn(line) }
+
+    /** Терпимый парсер: собирает состояние из любых подходящих строк буфера. */
     fun parse(lines: List<String>): DeviceState? = parse(lines, DeviceState())
 
     /**
@@ -89,41 +182,64 @@ object StatusParser {
      *
      * @return `null`, если в [lines] нет ни одной распознаваемой строки.
      */
-    fun parse(lines: List<String>, base: DeviceState): DeviceState? {
+    fun parse(lines: List<String>, base: DeviceState): DeviceState? =
+        parseDetailed(lines, base).state
+
+    /**
+     * Разбор с отчётом: состояние и список строк, которые никто не узнал.
+     *
+     * Значение, которое не удалось разобрать числом, НЕ заменяется дефолтом:
+     * остаётся предыдущее из [base] (раздел 6 контракта). Иначе потерянная
+     * строка `V0=` тихо сбрасывала бы громкость в 10 % — и ползунок прыгал бы
+     * назад на каждом потерянном пакете.
+     */
+    fun parseDetailed(lines: List<String>, base: DeviceState): ParseResult {
         var s = base
         var found = false
-        for (l in lines) {
+        val unknown = mutableListOf<String>()
+        for (raw in lines) {
+            val l = raw.trim()
+            if (l.isEmpty()) continue
+            var recognized = false
+
             reVol.find(l)?.let { m ->
                 s = s.copy(
-                    vol0 = m.groupValues[1].toIntOrNull() ?: 10,
-                    vol1 = m.groupValues[2].toIntOrNull() ?: 10,
-                    bal = m.groupValues[3].toFloatOrNull() ?: 0f
-                ); found = true
+                    vol0 = m.groupValues[1].toIntOrNull() ?: s.vol0,
+                    vol1 = m.groupValues[2].toIntOrNull() ?: s.vol1,
+                    bal = m.groupValues[3].toFloatOrNull() ?: s.bal
+                ); found = true; recognized = true
             }
             reFc.find(l)?.let { m ->
                 s = s.copy(
-                    fc = m.groupValues[1].toFloatOrNull() ?: 400f,
-                    hp = m.groupValues[2].toFloatOrNull() ?: 45f,
+                    fc = m.groupValues[1].toFloatOrNull() ?: s.fc,
+                    hp = m.groupValues[2].toFloatOrNull() ?: s.hp,
                     subOn = m.groupValues[3] == "ON"
-                ); found = true
+                ); found = true; recognized = true
             }
             reTrim.find(l)?.let { m ->
                 s = s.copy(
-                    tlf = m.groupValues[1].toFloatOrNull() ?: 0f,
-                    thf = m.groupValues[2].toFloatOrNull() ?: -1f
-                ); found = true
+                    tlf = m.groupValues[1].toFloatOrNull() ?: s.tlf,
+                    thf = m.groupValues[2].toFloatOrNull() ?: s.thf
+                ); found = true; recognized = true
             }
             reEq.find(l)?.let { m ->
                 s = s.copy(
-                    eql = m.groupValues[1].toFloatOrNull() ?: 0f,
-                    eqm = m.groupValues[2].toFloatOrNull() ?: 0f,
-                    eqh = m.groupValues[3].toFloatOrNull() ?: 0f
-                ); found = true
+                    eql = m.groupValues[1].toFloatOrNull() ?: s.eql,
+                    eqm = m.groupValues[2].toFloatOrNull() ?: s.eqm,
+                    eqh = m.groupValues[3].toFloatOrNull() ?: s.eqh
+                ); found = true; recognized = true
             }
-            reInv.find(l)?.let { m ->
-                s = s.copy(inv = m.groupValues[1].map { it == '1' }); found = true
+reMute.find(l)?.let { m ->
+                s = s.copy(muted = listOf(m.groupValues[1] == "1", m.groupValues[2] == "1"))
+                found = true; recognized = true
             }
-reBt.find(l)?.let { m ->
+            reSwp.find(l)?.let { m ->
+                s = s.copy(swapped = m.groupValues[1] == "1"); found = true; recognized = true
+            }
+            reDup.find(l)?.let { m ->
+                s = s.copy(dup = m.groupValues[1] == "1"); found = true; recognized = true
+            }
+            reBt.find(l)?.let { m ->
                 // У прошивки без поддержки `status` по SPP в строке есть только
                 // "BT: ON". Отсутствие группы — это «не сообщено», а не
                 // «SPP выключен»: иначе старый ответ гасил бы индикатор.
@@ -131,16 +247,16 @@ reBt.find(l)?.let { m ->
                 s = s.copy(
                     btAudioOn = m.groupValues[1] == "ON",
                     sppOn = if (spp.isNullOrEmpty()) s.sppOn else spp == "ON"
-                ); found = true
+                ); found = true; recognized = true
             }
             reTest.find(l)?.let { m ->
                 s = s.copy(
-                    testMode = m.groupValues[1].toIntOrNull() ?: 0,
+                    testMode = m.groupValues[1].toIntOrNull() ?: s.testMode,
                     testVol = m.groupValues.getOrNull(2)?.toIntOrNull() ?: s.testVol
-                ); found = true
+                ); found = true; recognized = true
             }
             reSrc.find(l)?.let { m ->
-                s = s.copy(srcKhz = m.groupValues[1]); found = true
+                s = s.copy(srcKhz = m.groupValues[1]); found = true; recognized = true
             }
             reXo.find(l)?.let { m ->
                 s = s.copy(
@@ -149,28 +265,71 @@ reBt.find(l)?.let { m ->
                     // о выключателе: там кроссовер всегда включён, поэтому
                     // отсутствие группы означает ON, а не потерю связи.
                     xoOn = m.groupValues.getOrNull(2) != "OFF"
-                ); found = true
+                ); found = true; recognized = true
             }
             reChf.find(l)?.let { m ->
                 val pairs = listOf(
-                    (m.groupValues[1].toIntOrNull() ?: 0) to (m.groupValues[2].toIntOrNull() ?: 0),
-                    (m.groupValues[3].toIntOrNull() ?: 0) to (m.groupValues[4].toIntOrNull() ?: 0),
-                    (m.groupValues[5].toIntOrNull() ?: 0) to (m.groupValues[6].toIntOrNull() ?: 0),
-                    (m.groupValues[7].toIntOrNull() ?: 0) to (m.groupValues[8].toIntOrNull() ?: 0)
+                    (m.groupValues[1].toIntOrNull() ?: s.chFilters[0].first) to
+                        (m.groupValues[2].toIntOrNull() ?: s.chFilters[0].second),
+                    (m.groupValues[3].toIntOrNull() ?: s.chFilters[1].first) to
+                        (m.groupValues[4].toIntOrNull() ?: s.chFilters[1].second),
+                    (m.groupValues[5].toIntOrNull() ?: s.chFilters[2].first) to
+                        (m.groupValues[6].toIntOrNull() ?: s.chFilters[2].second),
+                    (m.groupValues[7].toIntOrNull() ?: s.chFilters[3].first) to
+                        (m.groupValues[8].toIntOrNull() ?: s.chFilters[3].second)
                 )
-                s = s.copy(chFilters = pairs); found = true
+                s = s.copy(chFilters = pairs); found = true; recognized = true
             }
             reDly.find(l)?.let { m ->
+                val prev = s.delays
                 val d = listOf(
-                    m.groupValues[1].toIntOrNull() ?: 0,
-                    m.groupValues[2].toIntOrNull() ?: 0,
-                    m.groupValues[3].toIntOrNull() ?: 0,
-                    m.groupValues[4].toIntOrNull() ?: 0
+                    m.groupValues[1].toIntOrNull() ?: prev[0],
+                    m.groupValues[2].toIntOrNull() ?: prev[1],
+                    m.groupValues[3].toIntOrNull() ?: prev[2],
+                    m.groupValues[4].toIntOrNull() ?: prev[3]
                 )
-                s = s.copy(delays = d); found = true
+                s = s.copy(delays = d); found = true; recognized = true
             }
+            if (!recognized) unknown += l
         }
-        return if (found) s else null
+        return ParseResult(if (found) s.sanitized() else null, unknown)
+    }
+
+    /**
+     * Приведение состояния к диапазонам контракта (раздел 4).
+     *
+     * Устройство может сообщить значение вне диапазона: прошивка печатает
+     * фактическое, а не ограниченное, и после ручной правки через UART или
+     * после смены формата в блоке подпись слайдера показывала бы «250 %» при
+     * ползунке, который физически не может уйти выше 100.
+     */
+    internal fun DeviceState.sanitized(): DeviceState = copy(
+        vol0 = vol0.coerceIn(Limits.VOL_MIN.toInt(), Limits.VOL_MAX.toInt()),
+        vol1 = vol1.coerceIn(Limits.VOL_MIN.toInt(), Limits.VOL_MAX.toInt()),
+        bal = bal.coerceIn(Limits.BAL_MIN, Limits.BAL_MAX),
+        fc = fc.coerceIn(Limits.FC_MIN, Limits.FC_MAX),
+        hp = hp.coerceIn(Limits.HP_MIN, Limits.HP_MAX),
+        tlf = tlf.coerceIn(Limits.TRIM_MIN, Limits.TRIM_MAX),
+        thf = thf.coerceIn(Limits.TRIM_MIN, Limits.TRIM_MAX),
+        eql = eql.coerceIn(Limits.EQ_MIN, Limits.EQ_MAX),
+        eqm = eqm.coerceIn(Limits.EQ_MIN, Limits.EQ_MAX),
+        eqh = eqh.coerceIn(Limits.EQ_MIN, Limits.EQ_MAX),
+        testMode = testMode.coerceIn(Limits.TEST_MODE_MIN, Limits.TEST_MODE_MAX),
+        testVol = testVol.coerceIn(Limits.TEST_VOL_MIN, Limits.TEST_VOL_MAX),
+        xoType = xoType.coerceIn(Limits.XO_TYPE_MIN, Limits.XO_TYPE_MAX),
+        delays = delays.map {
+            it.coerceIn(Limits.DELAY_MIN, Limits.DELAY_MAX)
+        },
+        chFilters = chFilters.map { (hp, lp) -> sanitizeChFreq(hp) to sanitizeChFreq(lp) }
+    )
+
+    /**
+     * Частота канального фильтра: 0 — «выключено» и остаётся нулём, всё
+     * остальное зажимается в 20..20000 Гц. Прошивка включает секцию только
+     * от 20 Гц, поэтому значение 1..19 не имеет физического смысла.
+     */
+    private fun sanitizeChFreq(hz: Int): Int = when {
+        hz <= 0 -> 0
+        else -> hz.coerceIn(Limits.CH_FILTER_MIN, Limits.CH_FILTER_MAX)
     }
 }
-
