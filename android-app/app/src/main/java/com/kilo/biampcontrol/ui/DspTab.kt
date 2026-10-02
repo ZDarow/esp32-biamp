@@ -112,6 +112,7 @@ fun DspTab(vm: BiAmpViewModel) {
                 range = 200f..1000f,
                 steps = 15,
                 enabled = xoEnabled,
+                resetTo = Limits.FC_DEFAULT,
                 modifier = Modifier.weight(1f)
             ) { vm.setFc(it.roundToInt()) }
 
@@ -121,6 +122,7 @@ fun DspTab(vm: BiAmpViewModel) {
                 range = 20f..80f,
                 steps = 11,
                 enabled = subEnabled,
+                resetTo = Limits.HP_DEFAULT,
                 modifier = Modifier.weight(1f)
             ) { vm.setHp(it.roundToInt()) }
         }
@@ -175,11 +177,14 @@ Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.body
 }
 
 /**
- * Ручка с подписью и текущим значением для горизонтальной линии.
+ * Ручка с подписью для горизонтальной линии.
  *
- * Подпись и число стоят под крутилкой, а не рядом: на две ручки в ряд ширины
+ * Подпись стоит под крутилкой, а не рядом: на две ручки в ряд ширины
  * не хватает, и подпись сбоку выдавила бы вторую ручку за край экрана.
- * Число набрано покрупнее подписи — на него смотрят, выставляя частоту.
+ * Текущее значение выводится в центре самой ручки — там, куда смотрит
+ * глаз во время поворота, — поэтому подпись держит только название.
+ * Двойной тап возвращает [resetTo], то есть заводское значение: руку
+ * увели с узкого места и обратно уже не угадаешь на слух.
  */
 @Composable
 private fun DialKnob(
@@ -189,6 +194,7 @@ private fun DialKnob(
     steps: Int,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    resetTo: Float,
     onFinished: (Float) -> Unit
 ) {
     val stateText = sliderStateText(value, steps, " Гц")
@@ -204,18 +210,15 @@ private fun DialKnob(
             steps = steps,
             diameter = 132.dp,
             label = label,
-            stateText = stateText
+            stateText = stateText,
+            valueText = stateText,
+            defaultValue = resetTo
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            stateText,
-            style = MaterialTheme.typography.titleLarge,
-            color = if (enabled) MaterialTheme.colorScheme.primary
+            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
             else MaterialTheme.colorScheme.outline
         )
     }
