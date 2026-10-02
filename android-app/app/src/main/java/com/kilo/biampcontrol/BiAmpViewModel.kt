@@ -123,10 +123,12 @@ constructor(app: Application) : this(app, { SppManager(it) })
     private fun requestStatusSync() {
         isSyncing.value = true
         syncRequestedAt = System.currentTimeMillis()
-        // Буфер очищается ДО отправки: недобранный хвост прошлого опроса
-        // не должен смешаться с новым блоком, иначе в состояние попадут
-        // значения двух разных моментов времени.
-        statusBuffer.clear()
+        // Буфер НЕ очищается здесь: он чистится по первой строке пришедшего
+        // блока ([StatusParser.isBlockStart]). Очистка здесь обрезала блок,
+        // который уже идёт от усилителя, если запрос пришёл в его середину:
+        // в буфере оставался хвост без начала, и часть полей состояния
+        // оставалась прежней. Остаток прошлой сессии очищается при CONNECTED
+        // и после разбора полного блока.
         sender.send("status", true)
     }
 
@@ -292,9 +294,10 @@ constructor(app: Application) : this(app, { SppManager(it) })
 
     // ── Приём ───────────────────────────────────────────────────
     private fun onLine(line: String) {
-        if (StatusParser.isStatusLine(line)) {
-            statusBuffer.addLast(line)
-            if (statusBuffer.size > STATUS_LINES) statusBuffer.removeFirst()
+        // Политика буфера (обнуление на начале блока, отбрасывание лишнего)
+        // живёт в парсере: здесь только накопление и разбор.
+        val blockStarted = StatusParser.appendToBlock(statusBuffer, line, STATUS_LINES)
+        if (blockStarted || StatusParser.isStatusLine(line)) {
             // Разбор идёт поверх текущего состояния, а не поверх значений по
             // умолчанию: блок status приходит 13 строками, и на первых
             // двенадцати в буфере ещё нет, например, строки Delay. Разбор с

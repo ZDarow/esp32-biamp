@@ -124,4 +124,7 @@
     <string name="dup_switch">Duplicate to 2, 3</string>
     <string name="dup_warning">DUP: 1 - channels 2 and 3 are physically silent. Restore</string>
 
+    <!-- Documentation sheet: hint under the title. -->
+    <string name="docs_sheet_hint">Drag the sheet down or tap the cross to close</string>
+
 </resources>

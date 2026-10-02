@@ -127,4 +127,7 @@
     <string name="dup_switch">Дублировать на 2, 3</string>
     <string name="dup_warning">DUP: 1 — каналы 2 и 3 физически молчат. Восстановить</string>
 
+    <!-- Документация в шторке: подсказка под заголовком. -->
+    <string name="docs_sheet_hint">Потяните шторку вниз или нажмите крестик, чтобы закрыть</string>
+
 </resources>
