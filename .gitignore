@@ -22,6 +22,15 @@ output-metadata.json
 idf-spike/
 idf-spike-*/
 
+# Сниффер на ESP-IDF: sdkconfig создаётся из sdkconfig.defaults и содержит
+# локальные пути, каталог build/ уже исключён выше.
+firmware/capture/sdkconfig
+firmware/capture/sdkconfig.old
+
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
 # ── Локальная конфигурация ─────────────────────────────────────────────
 # Содержит локальные пути, не должна попадать в репозиторий
 local.properties
