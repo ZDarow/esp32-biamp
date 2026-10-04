@@ -47,6 +47,11 @@ CAP_TRAILER_BYTES = 32
 CHANNELS = 4
 FRAME_BYTES = CHANNELS * 2
 
+# Задержка, которую сценарий `delay` задаёт на канале Z2 НФ. Одно и то же
+# число живёт в командах сценария и в проверке: иначе ожидание и запрос могут
+# разойтись незаметно.
+DELAY_SET_SAMPLES = 64
+
 CH_NAMES = ("Z1 НЧ", "Z1 ВЧ", "Z2 НЧ", "Z2 ВЧ")
 
 # Полная шкала отсчёта int16. Все уровни в отчёте — относительно неё.
@@ -54,6 +59,16 @@ FULL_SCALE = 32768.0
 
 # Порог разрыва между соседними отсчётами, за которым считаем щелчок.
 CLICK_JUMP = 0.35 * FULL_SCALE
+
+# Чистый захват не содержит щелчков вовсе: тон и развёртка на уровне теста
+# (tvol:4) дают разрыв соседних отсчётов не выше ~4000 отсчётов, а порог щелчка
+# — 11469. Поэтому чистота = ноль щелчков, и порог не нужен.
+CLICK_GATE = 0
+
+# Сколько раз перезаписать захват, если в нём нашёлся брак пути измерения.
+# Брак интермиттирующий (~1 захват из двух), поэтому три попытки дают ~15 %
+# шанса, что все три грязные; восемь — менее одного процента.
+MAX_CAPTURE_ATTEMPTS = 8
 
 # Закон развёртки в прошивке Master: freq = 20 * 1000^(t/10), период 10 с.
 SWEEP_LO = 20.0
@@ -63,9 +78,14 @@ SWEEP_PERIOD = 10.0
 
 # ── сценарии ────────────────────────────────────────────────────────────
 # cmds — команды Master, wait — пауза перед записью, rec — длительность.
+#
+# Во всех сценариях тон задаётся через `test:all`, а не `test:1`. `test:1`
+# (режим 6) кормит только канал 1 — это первая НФ-ветка Z1, — поэтому Z2 и обе
+# ВЧ-ветки молчат ровно в четыре раза, и половина отчёта получается пустой.
+# `test:all` (режим 1) даёт сигнал всем четырём каналам сразу.
 SCENARIOS: dict[str, dict] = {
     "dup": {
-        "cmds": ["dup:1", "tvol:4", "tf:1000", "test:1"],
+        "cmds": ["dup:1", "tvol:4", "tf:1000", "test:all"],
         "wait": 2.0, "rec": 6.0, "tone": 1000.0,
         "note": "оба I²S-порта получают один блок — калибровка выравнивания зон и порядка слотов",
     },
@@ -74,13 +94,20 @@ SCENARIOS: dict[str, dict] = {
         "wait": 2.0, "rec": 6.0, "tone": None,
         "note": "шумовая полка, смещение и дрейф каждого канала",
     },
-    "tone-low": {
-        "cmds": ["dup:0", "tvol:4", "tf:100", "test:1"],
+    "zones": {
+        "cmds": ["dup:0", "delay0:0", "delay1:0", "delay2:0", "delay3:0",
+                 "tvol:4", "tf:100", "test:all"],
         "wait": 2.0, "rec": 6.0, "tone": 100.0,
-        "note": "тон ниже кроссовера: НЧ-ветка обоих усилителей",
+        "note": "все задержки нулевые, тон 100 Гц: чистое смещение между зонами — "
+                "это база, от которой отсчитывается проверка задержки",
+    },
+    "tone-low": {
+        "cmds": ["dup:0", "tvol:4", "tf:100", "test:all"],
+        "wait": 2.0, "rec": 6.0, "tone": 100.0,
+        "note": "тон ниже кроссовера: НФ-ветка обоих усилителей",
     },
     "tone-high": {
-        "cmds": ["dup:0", "tvol:4", "tf:5000", "test:1"],
+        "cmds": ["dup:0", "tvol:4", "tf:5000", "test:all"],
         "wait": 2.0, "rec": 6.0, "tone": 5000.0,
         "note": "тон выше кроссовера: ВЧ-ветка обоих усилителей",
     },
@@ -95,13 +122,16 @@ SCENARIOS: dict[str, dict] = {
         "note": "АЧХ четырёх выходов: точка кроссовера и затухание вне полосы",
     },
     "delay": {
-        "cmds": ["dup:0", "delay0:0", "delay1:0", "delay2:64", "delay3:64",
-                 "tvol:4", "tf:1000", "test:1"],
-        "wait": 2.0, "rec": 6.0, "tone": 1000.0,
-        "note": "задержка 64 отсчёта на Z2: проверка, что DSP её реально вносит",
+        "cmds": ["dup:0", "delay0:0", "delay1:0", f"delay2:{DELAY_SET_SAMPLES}", "delay3:0",
+                 "tvol:4", "tf:100", "test:all"],
+        "wait": 2.0, "rec": 6.0, "tone": 100.0,
+        "note": "задержка 64 отсчёта на канале Z2 НФ (Z2 ВЧ без задержки): "
+                "разность задержек между каналами внутри одной зоны не зависит "
+                "от сдвига между зонами, тон 100 Гц — иначе сдвиг 64 отсчётов "
+                "неотличим от 20 (период 1 кГц равен 44.1 отсчёта)",
     },
     "clip": {
-        "cmds": ["dup:0", "tvol:6", "tf:1000", "test:1"],
+        "cmds": ["dup:0", "tvol:6", "tf:1000", "test:all"],
         "wait": 2.0, "rec": 6.0, "tone": 1000.0,
         "note": "максимально разрешённый уровень теста: ищем клиппинг",
     },
@@ -117,17 +147,36 @@ def open_port(port: str, baud: int, timeout: float):
     return serial.Serial(port, baud, timeout=timeout)
 
 
-def read_until_marker(ser, marker: bytes = b"\nEND", idle_timeout: float = 30.0) -> bytes:
-    """Читает поток до строки END. Таймаут по простою, а не по общему времени."""
+# Порог простоя: при потоке 352 КБ/с это 30 с молчания — заведомый обрыв.
+IDLE_TIMEOUT_S = 30.0
+
+# Окно, в котором ищется маркер в конце накопленного буфера. Маркер стоит в
+# начале ASCII-строки END, а не в последних байтах: строка «END frames=… errors=0»
+# занимает ещё около 45 байт после него. Окно должно быть длиннее этой строки.
+TAIL_WINDOW = 128
+
+
+def read_until_marker(ser, marker: bytes = b"END1END", idle_timeout: float = IDLE_TIMEOUT_S,
+                     initial: bytes = b"") -> bytes:
+    """Читает поток до завершающей строки END. Таймаут по простою, а не по общему времени.
+
+    Маркер — семь байт: магия трейлера `END1` и сразу за ней ASCII-строка `END`.
+    Одной магии мало: кадры — двоичные данные, и в ней она встречается случайно.
+    Перевод строки перед `END` искать нельзя: трейлер заканчивается магией
+    вплотную к строке, разделителя там нет. `initial` — уже прочитанный хвост
+    после `GO`, он проверяется на маркер по общей с ним строке.
+    """
     import time
 
-    buf = bytearray()
+    buf = bytearray(initial)
+    if marker in buf[-TAIL_WINDOW:]:
+        return bytes(buf)
     deadline = time.monotonic() + idle_timeout
     while True:
         chunk = ser.read(65536)
         if chunk:
             buf += chunk
-            if marker in buf[-64:]:
+            if marker in buf[-TAIL_WINDOW:]:
                 return bytes(buf)
             deadline = time.monotonic() + idle_timeout
             continue
@@ -140,7 +189,7 @@ def sniffer_command(ser, cmd: str, expect: bytes | None = None, retries: int = 2
 
     for _ in range(retries):
         ser.reset_input_buffer()
-        ser.write(cmd + "\n")
+        ser.write(cmd.encode("ascii") + b"\n")
         ser.flush()
         end = time.monotonic() + 0.4
         buf = bytearray()
@@ -183,34 +232,122 @@ def parse_trailer(blob: bytes) -> dict:
     }
 
 
+def master_command(ser, cmd: str, timeout: float = 1.0) -> str:
+    """Шлёт команду Master и возвращает её ответ.
+
+    Ответ нужен не для красоты: у `tvol:`, `test:` и `status` он есть, и по
+    нему видно, что команда действительно принята. Молча отправленная команда
+    выглядит на ПК так же, как сработавшая, а отчёт потом объясняет тишину
+    чем угодно, только не тем, что тест не включился.
+    """
+    import time
+
+    ser.reset_input_buffer()
+    ser.write(cmd.encode("ascii") + b"\n")
+    ser.flush()
+    deadline = time.monotonic() + timeout
+    buf = bytearray()
+    while time.monotonic() < deadline:
+        chunk = ser.read(4096)
+        if chunk:
+            buf += chunk
+            deadline = max(deadline, time.monotonic() + 0.25)
+    return bytes(buf).decode(errors="replace").strip()
+
+
+def wait_master_ready(ser, timeout: float = 12.0) -> str:
+    """Дожидается, пока Master поднимется и начнёт отвечать.
+
+    Открытие COM-порта дёргает DTR/RTS, а у ESP32 это аппаратный сброс: первые
+    секунды порт молчит. Команды, отправленные сразу после открытия, уходят в
+    пустоту, сценарий отрабатывает вхолостую, и тишина в отчёте выглядит как
+    результат измерения. Признак готовности — строка `RingDrops` в ответе на
+    `stats`: она печатается только после инициализации тракта.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    seen = ""
+    while time.monotonic() < deadline:
+        seen = master_command(ser, "stats", timeout=1.0)
+        if "RingDrops" in seen:
+            return seen
+        time.sleep(0.3)
+    raise SystemExit(
+        "Master не отвечает на stats — проверьте питание и порт. "
+        f"Последний ответ: {seen!r}")
+
+
 def receive(ser, seconds: float, master_port=None, cmds: list[str] | None = None,
-            wait: float = 0.0) -> tuple[np.ndarray, dict, dict]:
+            wait: float = 0.0) -> tuple[np.ndarray, dict, dict, bytes]:
     import time
 
     if master_port is not None:
         for cmd in cmds or []:
-            master_port.write(cmd + "\n")
-            master_port.flush()
+            reply = master_command(master_port, cmd, timeout=1.0)
+            # Троттлинг 150 мс обязателен для SPP; по USB-CDC он не нужен, но
+            # пауза оставлена — иначе соседние команды склеиваются в один пакет.
+            if reply:
+                print(f"Master {cmd} -> {reply.splitlines()[-1]}")
+            else:
+                print(f"Master {cmd} -> без ответа")
             time.sleep(0.15)
     if wait > 0:
         time.sleep(wait)
 
     ser.reset_input_buffer()
-    sniffer_command(ser, f"START {seconds:g}", expect=b"GO")
-    blob = read_until_marker(ser)
-    if b"\nEND" not in blob:
-        raise SystemExit("В потоке нет завершающей строки END")
+    ser.write(f"START {seconds:g}\n".encode("ascii"))
+    ser.flush()
 
-    end_pos = blob.rindex(b"\nEND")
-    head = blob[:end_pos]
-    hdr = parse_header(head[:CAP_HEADER_BYTES])
-    data_end = head.rindex(b"\nEND", 0, len(head) - 4) if b"\nEND" in head else -1
-    tail_start = len(head) - CAP_TRAILER_BYTES if data_end < 0 else data_end - CAP_TRAILER_BYTES
-    trailer = parse_trailer(head[tail_start:tail_start + CAP_TRAILER_BYTES])
-    payload = head[CAP_HEADER_BYTES:tail_start]
+    # GO и первые кадры приходят одним куском, поэтому строка отделяется от
+    # хвоста, а не вычитывается отдельным вызовом: иначе теряется начало записи.
+    # Дальше идёт тело — заголовок 32 Б, кадры, трейлер 32 Б и ASCII-строка END.
+    deadline = time.monotonic() + 2.0
+    head = bytearray()
+    while b"\n" not in head:
+        if time.monotonic() > deadline:
+            raise SystemExit("Сниффер не ответил на START")
+        chunk = ser.read(4096)
+        if chunk:
+            head += chunk
+    line, _, rest = bytes(head).partition(b"\n")
+    if line.strip() != b"GO":
+        raise SystemExit(f"Сниффер отклонил START: {line!r}")
+
+    blob = read_until_marker(ser, initial=rest)
+    # Якорь — семь байт: магия трейлера `END1` и сразу за ней ASCII `END`. Поиск
+    # только магии даёт ложные срабатывания в двоичных кадрах, а перевода строки
+    # перед `END` на проводе нет. Трейлер — это 32 байта ВЫПЕРЕД от якоря:
+    # магия стоит в его последнем слове, поэтому в `body` попадают целиком.
+    end_idx = blob.rfind(b"END1END")
+    if end_idx < CAP_TRAILER_BYTES - 4:
+        raise SystemExit("В потоке нет завершающей строки END")
+    body = blob[:end_idx + 4]
+    if len(body) < CAP_HEADER_BYTES + CAP_TRAILER_BYTES:
+        raise SystemExit("Поток короче заголовка с трейлером")
+
+    hdr = parse_header(body[:CAP_HEADER_BYTES])
+    trailer = parse_trailer(body[-CAP_TRAILER_BYTES:])
+    payload = body[CAP_HEADER_BYTES:len(body) - CAP_TRAILER_BYTES]
     frames = len(payload) // hdr["frame_bytes"]
+    if hdr["frame_bytes"] != FRAME_BYTES:
+        raise SystemExit(f"Неожиданный размер кадра: {hdr['frame_bytes']} байт")
     data = np.frombuffer(payload[:frames * hdr["frame_bytes"]], dtype="<i2").reshape(-1, CHANNELS)
-    return data.astype(np.int32), hdr, trailer
+    # Без этой проверки запись с молча пропавшими байтами выглядит как обычный
+    # сигнал: сдвиг на 2 байта — это ровно половина кадра, и четыре канала после
+    # него читаются как попарно перепутанные. Считать такое нельзя.
+    if frames != trailer["frames"]:
+        raise SystemExit(
+            f"Запись битая: плата отправила {trailer['frames']} кадров, "
+            f"хост принял {frames}. Повторить захват.")
+    if len(payload) % FRAME_BYTES:
+        raise SystemExit(
+            f"Запись битая: в полезной части {len(payload)} байт, "
+            f"кратно {FRAME_BYTES} только {frames * FRAME_BYTES}. Повторить захват.")
+    # Возвращается тело потока (заголовок + кадры + трейлер), а не весь блоб с
+    # строками GO/END: в этом виде файл читается обратно через load_raw без
+    # вычитания ASCII-обвязки.
+    return data.astype(np.int32), hdr, trailer, body
 
 
 # ── расчёты ─────────────────────────────────────────────────────────────
@@ -449,10 +586,92 @@ def bit_compare(data: np.ndarray) -> dict:
     return {"pairs": out}
 
 
-# ── отчёт ───────────────────────────────────────────────────────────────
+# ── счётчики Master ─────────────────────────────────────────────────────
+# Строки `stats`, которые обязаны быть нулевыми. Порядок и начертание заданы
+# прошивкой; разбор устойчив к лишним пробелам и к посторонним строкам.
+MASTER_COUNTERS = ("RingDrops", "SelfTestErr", "Underrun", "Clips", "Starve",
+                   "Ring selftest")
+
+
+def parse_master_stats(text: str) -> dict:
+    """Достаёт из ответа `stats` строки со счётчиками и их значения."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        for key in MASTER_COUNTERS:
+            if key in line:
+                out[key] = line
+                break
+    return out
+
+
+def capture_retry(sniffer, master, meta: dict, seconds: float, scenario: str,
+                  max_clicks: int = CLICK_GATE) -> tuple[np.ndarray, dict, dict, bytes, int]:
+    """Захват с повтором, пока каналы не содержат одиночных выбросов.
+
+    Между выходом Master и файлом на ПК есть путь, который даёт редкие
+    одиночные выбросы почти полной шкалы: в режиме dup:1 оба порта Master несут
+    побайтово один буфер, а выбросы при этом видны только в Z1 — значит брак
+    возникает на проводе или в приёме I²S на S3, и к тракту Master отношения не
+    имеет. Такая запись годится только для того, чтобы показать, что брак есть;
+    измерять по ней амплитуду, фазу и THD нельзя, поэтому кадр перезаписывается.
+
+    Сценарий `clip` повтором не пользоваться: клиппинг там и есть предмет
+    измерения.
+    """
+    attempts = 0
+    gate = None if scenario == "clip" else max_clicks
+    for attempts in range(1, MAX_CAPTURE_ATTEMPTS + 1):
+        first = attempts == 1
+        data, hdr, trailer, body = receive(
+            sniffer, seconds, master if first else None,
+            meta["cmds"] if first else [], meta["wait"] if first else 0.4)
+        if gate is None:
+            break
+        rate = float(hdr["declared_rate"])
+        clicks = [click_scan(data[:, i], rate)["count"] for i in range(data.shape[1])]
+        if max(clicks) <= gate:
+            break
+        print(f"Попытка {attempts}: щелчков по каналам {clicks} — брак пути "
+              f"измерения, перезаписываем")
+    return data, hdr, trailer, body, attempts
+
+
+def delay_residual(base_lag: int, z2lf_lag: int, z2hf_lag: int, d_set: int) -> dict:
+    """Проверяет задержку DSP разностью отсчётов внутри одной зоны.
+
+    Сдвиг между зонами у сниффера не фиксирован: каждая зона читается своим DMA
+    и своим вызовом `i2s_channel_read`, поэтому момент, с которого кадры зон
+    считаются соответствующими друг другу, от прогона к прогону гуляет на
+    десятки отсчётов. Из-за этого абсолютная задержка между зонами снаффером не
+    измеряется вовсе, зато разность задержек ДВУХ КАНАЛОВ ОДНОЙ ЗОНЫ от него не
+    зависит: сдвиг входит в неё одинаковым слагаемым и при вычитании исчезает.
+
+    Пусть O — сдвиг между зонами, P — запаздывание ВЧ-ветки относительно НЧ
+    внутри зоны (берётся по паре каналов Z1, где задержки нулевые), D — заданная
+    задержка канала Z2 НФ. Тогда, по соглашению xcorr_lag (b отстаёт от a на d →
+    lag = −d):
+
+        lag(Z1 НФ → Z2 НФ) = −(O + D)
+        lag(Z1 НФ → Z2 ВЧ) = −(O − P)
+
+    Разность даёт lag(ВЧ) − lag(НФ) = D + P, то есть D = разность − P. Остаток
+    этой формулы — ошибка модели, а не измерения; он и есть результат проверки.
+    """
+    phase = -base_lag
+    measured_diff = z2hf_lag - z2lf_lag
+    predicted_diff = d_set + phase
+    return {
+        "delay_set": d_set,
+        "phase_low_to_high": phase,
+        "measured_diff": measured_diff,
+        "predicted_diff": predicted_diff,
+        "residual": measured_diff - predicted_diff,
+        "zone_offset": -z2lf_lag - d_set,
+    }
 def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | None,
-            scenario: str | None) -> dict:
-    meta = SCENARIOS.get(scenario or "", {})
+            scenario: str | None, master_stats: dict | None = None) -> dict:
+    meta = SCENARIOS.get(scenario or "", "")
     tone = meta.get("tone")
     report: dict = {
         "scenario": scenario,
@@ -460,6 +679,7 @@ def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | Non
         "frames": int(len(data)),
         "seconds": len(data) / rate if rate > 0 else 0.0,
         "rate": rate,
+        "master_counters": master_stats or {},
         "header": hdr,
         "trailer": trailer,
         "channels": {},
@@ -488,6 +708,18 @@ def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | Non
 
     if scenario == "dup":
         report["dup"] = bit_compare(data)
+
+    if scenario == "delay":
+        by_pair = {d["pair"]: d for d in report["delays"]}
+        needed = (f"{CH_NAMES[0]} → {CH_NAMES[1]}",
+                  f"{CH_NAMES[0]} → {CH_NAMES[2]}",
+                  f"{CH_NAMES[0]} → {CH_NAMES[3]}")
+        if all(p in by_pair and by_pair[p].get("reliable") for p in needed):
+            report["delay_check"] = delay_residual(
+                by_pair[needed[0]]["lag"], by_pair[needed[1]]["lag"],
+                by_pair[needed[2]]["lag"], DELAY_SET_SAMPLES)
+        else:
+            report["delay_check"] = {"error": "каналы неразличимы, проверка невозможна"}
 
     if tone:
         for i, name in enumerate(CH_NAMES[:data.shape[1]]):
@@ -538,6 +770,10 @@ def render_markdown(rep: dict) -> str:
     rate = rep.get("rate_true_measured") or rep["rate"]
     add(f"Кадров: {rep['frames']} · секунд: {rep['seconds']:.2f} · "
         f"частота: {fmt(rep['rate'], 1)} Гц (заявлена), измерена по тону: {fmt(rate, 1)} Гц")
+    if rep.get("capture_attempts", 1) > 1:
+        add("")
+        add(f"Захват принят с попытки {rep['capture_attempts']}: предыдущие отброшены "
+            "из-за брака пути измерения (одиночные выбросы на проводе Z1 или в приёме S3).")
     tr = rep.get("trailer")
     if tr:
         add("")
@@ -547,6 +783,16 @@ def render_markdown(rep: dict) -> str:
         add(f"- потеряно зоной Z1/Z2: {tr['dropped_z1']} / {tr['dropped_z2']}")
         add(f"- максимальный разрыв синхронизации зон: {tr['max_skew_frames']} кадров")
         add(f"- ошибок USB: {tr['errors']}")
+    mc = rep.get("master_counters") or {}
+    add("")
+    if mc:
+        add("Счётчики Master после захвата (сняты в той же сессии, что и запись — "
+            "переоткрытие порта перезагружает плату и обнуляет их):")
+        add("")
+        for value in mc.values():
+            add(f"- {value}")
+    else:
+        add("Счётчики Master не сняты: запуск шёл без `--master`.")
     add("")
     add("## Каналы")
     add("")
@@ -572,6 +818,25 @@ def render_markdown(rep: dict) -> str:
         for p in rep["dup"]["pairs"]:
             verdict = "совпадает" if p["identical"] else f"расхождение {p['pct']:.3f} %"
             add(f"- {p['pair']}: {verdict}")
+    if "delay_check" in rep:
+        dc = rep["delay_check"]
+        add("")
+        add("## Проверка задержки DSP")
+        add("")
+        if "error" in dc:
+            add(f"- {dc['error']}")
+        else:
+            add("Разность задержек внутри одной зоны не зависит от сдвига между "
+                "зонами, поэтому проверка нечувствительна к неточному выравниванию "
+                "зон снаффером.")
+            add("")
+            add(f"- задано на Z2 НФ: {dc['delay_set']} отсчётов")
+            add(f"- запаздывание ВЧ-ветки внутри зоны: {dc['phase_low_to_high']} отсчётов")
+            add(f"- измеренная разность lag(ВЧ) − lag(НФ): {dc['measured_diff']}")
+            add(f"- ожидаемая разность: {dc['predicted_diff']}")
+            add(f"- остаток: {dc['residual']} отсчётов")
+            add(f"- сдвиг между зонами в этом прогоне (справочно): "
+                f"{dc['zone_offset']} отсчётов")
     if rep["tones"]:
         add("")
         add("## Тон")
@@ -660,6 +925,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     meta = SCENARIOS[args.scenario]
+    scenario = args.scenario
+    master_stats: dict[str, str] = {}
+    capture_attempts = 1
 
     if args.analyze:
         src = Path(args.analyze)
@@ -685,16 +953,38 @@ def main(argv: list[str] | None = None) -> int:
             print("Сниффер:", sniffer_command(sniffer, "INFO").decode(errors="replace").strip())
             if args.master:
                 master = open_port(args.master, 115200, timeout=0.5)
-                master.reset_input_buffer()
-            data, hdr, trailer = receive(sniffer, seconds, master, meta["cmds"], meta["wait"])
-        finally:
-            sniffer.close()
+                # DTR/RTS на ESP32 — это сброс. Отпустить их нужно до любой
+                # команды, иначе Master перезагрузится уже во время захвата.
+                master.dtr = False
+                master.rts = False
+                boot = wait_master_ready(master)
+                counters = [ln.strip() for ln in boot.splitlines()
+                            if ln.strip().startswith(("RingDrops", "Underrun", "Clips"))]
+                print("Master готов:", "; ".join(counters) or "ответ без счётчиков")
+            data, hdr, trailer, body, capture_attempts = capture_retry(
+                sniffer, master, meta, seconds, scenario)
+            if capture_attempts > 1:
+                print(f"Захват принят с попытки {capture_attempts}")
             if master is not None:
+                # Счётчики снимаются здесь же: следующее открытие порта дёрнет
+                # DTR/RTS, Master перезагрузится, и все счётчики станут нулями —
+                # ровно теми, которых ждёт проверка. Так дефект тракта не будет
+                # выглядеть как «всё чисто».
+                master_stats = parse_master_stats(master_command(master, "stats", timeout=2.0))
+        finally:
+            if master is not None:
+                master.dtr = False
+                master.rts = False
                 master.close()
+            sniffer.close()
         rate = float(hdr["declared_rate"])
         write_wav(outdir / "capture.wav", data, rate)
+        if args.keep_raw:
+            (outdir / "raw.bin").write_bytes(body)
+            print(f"Сырой поток: {outdir / 'raw.bin'}")
 
-    report = analyze(data, rate, hdr, trailer, scenario or args.scenario)
+    report = analyze(data, rate, hdr, trailer, scenario or args.scenario, master_stats)
+    report["capture_attempts"] = capture_attempts
     (outdir / "report.md").write_text(render_markdown(report), encoding="utf-8")
     (outdir / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2, default=float), encoding="utf-8")

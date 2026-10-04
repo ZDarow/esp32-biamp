@@ -5,6 +5,9 @@ Master в подчинённом режиме, склеивает их в оди
 по нативному USB. Настройки Master, прошивка и протокол не меняются —
 измеряется ровно то, что физически уходит на провода.
 
+Аудит цифрового тракта, проведённый этим сниффером (состав тракта, методика,
+результаты, устранённый дефект зоны Z1) — в `AUDIT.md`.
+
 ## Назначение
 
 Аудит цифрового тракта Master:
@@ -21,12 +24,12 @@ Master в подчинённом режиме, склеивает их в оди
 
 | Master (ESP32 WROOM-32) | ESP32-S3-DevKitC-1 |
 |---|---|
-| GPIO2  I²S0 DOUT (зона Z1) | `CAP_Z1_DATA` = GPIO6 |
-| GPIO15 I²S0 LRCK (зона Z1) | `CAP_Z1_LRCK` = GPIO5 |
-| GPIO4  I²S0 BCLK (зона Z1) | `CAP_Z1_BCK` = GPIO4 |
-| GPIO26 I²S1 DOUT (зона Z2) | `CAP_Z2_DATA` = GPIO9 |
-| GPIO27 I²S1 LRCK (зона Z2) | `CAP_Z2_LRCK` = GPIO8 |
-| GPIO25 I²S1 BCLK (зона Z2) | `CAP_Z2_BCK` = GPIO7 |
+| GPIO2  I²S0 DOUT (зона Z1) | `CAP_Z1_DATA` = GPIO17 |
+| GPIO15 I²S0 LRCK (зона Z1) | `CAP_Z1_LRCK` = GPIO18 |
+| GPIO4  I²S0 BCLK (зона Z1) | `CAP_Z1_BCK` = GPIO16 |
+| GPIO26 I²S1 DOUT (зона Z2) | `CAP_Z2_DATA` = GPIO41 |
+| GPIO27 I²S1 LRCK (зона Z2) | `CAP_Z2_LRCK` = GPIO40 |
+| GPIO25 I²S1 BCLK (зона Z2) | `CAP_Z2_BCK` = GPIO42 |
 | GND | GND |
 
 Обязательна общая земля — без неё уровни 3.3 В не определены. Питание S3 —
