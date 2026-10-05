@@ -32,12 +32,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # Файлы направления появляются в main не сразу: пока ветка verify-dev
+      # не слита, на main их просто нет, и проверять нечего. Молчаливый
+      # пропуск с честной пометкой лучше падения: иначе main был бы красным
+      # по причине, которая к нему не относится. Когда файлы появятся,
+      # условие станет истинным и проверки заработают.
+      - name: Проверить наличие файлов направления
+        id: present
+        run: |
+          if [ -f firmware/tools/capture-analyze.py ] \
+             && [ -f firmware/capture/AUDIT.md ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Установка Python и numpy
+        if: steps.present.outputs.found == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Установка зависимостей
+        if: steps.present.outputs.found == 'true'
         run: python -m pip install --disable-pip-version-check numpy
 
       # Сниффер — отдельная прошивка на ESP-IDF, а не Arduino-скетч, поэтому
@@ -46,15 +63,18 @@ jobs:
       # Проверка ниже ограничивается тем, что можно поймать без железа:
       # синтаксис, самодиагностика сценариев и отсутствие абсолютных путей.
       - name: Проверка синтаксиса анализатора
+        if: steps.present.outputs.found == 'true'
         run: python -m py_compile firmware/tools/capture-analyze.py
 
       - name: Самодиагностика анализатора
+        if: steps.present.outputs.found == 'true'
         run: python firmware/tools/capture-analyze.py --list-scenarios
 
       # Методика аудита и сниффер должны оставаться переносимыми: раньше в
-      # AUDIT.md попали локальные пути D:\BTBiAmp и C:\esp, из-за чего
+      # README.md попали локальные пути D:\BTBiAmp и C:\esp, из-за чего
       # инструкция воспроизведения работала только на одной машине.
       - name: Проверка переносимости методики
+        if: steps.present.outputs.found == 'true'
         run: |
           set -euo pipefail
           BAD=$(grep -rInE '[A-Za-z]:\\|/home/|/Users/' \
@@ -66,3 +86,8 @@ jobs:
             exit 1
           fi
           echo "Абсолютных путей нет"
+
+      - name: Пропуск: файлов направления на этой ветке нет
+        if: steps.present.outputs.found != 'true'
+        run: |
+          echo "::notice::Сниффер и анализатор ещё не слиты в эту ветку — проверки пропущены"
