@@ -653,14 +653,14 @@ def delay_residual(base_lag: int, z2lf_lag: int, z2hf_lag: int, d_set: int) -> d
     lag = −d):
 
         lag(Z1 НФ → Z2 НФ) = −(O + D)
-        lag(Z1 НФ → Z2 ВЧ) = −(O − P)
+        lag(Z1 НФ → Z2 ВЧ) = −(O + P)
 
-    Разность даёт lag(ВЧ) − lag(НФ) = D + P, то есть D = разность − P. Остаток
+    Разность даёт lag(ВЧ) − lag(НФ) = D − P, то есть D = разность + P. Остаток
     этой формулы — ошибка модели, а не измерения; он и есть результат проверки.
     """
     phase = -base_lag
     measured_diff = z2hf_lag - z2lf_lag
-    predicted_diff = d_set + phase
+    predicted_diff = d_set - phase
     return {
         "delay_set": d_set,
         "phase_low_to_high": phase,
