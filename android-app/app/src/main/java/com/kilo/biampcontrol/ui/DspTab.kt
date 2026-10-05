@@ -82,10 +82,10 @@ fun DspTab(vm: BiAmpViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
                        label = { Text("Butterworth") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
+                      modifier = Modifier.weight(1f))
             FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
                        label = { Text("LR4") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
+                      modifier = Modifier.weight(1f))
         }
 
         Row(
@@ -93,7 +93,7 @@ fun DspTab(vm: BiAmpViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
         }
 
@@ -142,7 +142,7 @@ fun DspTab(vm: BiAmpViewModel) {
         Caption(stringResource(R.string.band_caption))
         FilterGraph(vm, ds, enabled)
 
-HorizontalDivider()
+        HorizontalDivider()
 
         // ── 5. Раскладка выходов: L/R и дублирование 2,3 ──────────
         // Предупреждение о DUP обязано быть на экране: при DUP: 1 каналы
@@ -159,8 +159,8 @@ HorizontalDivider()
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it) }, enabled = enabled)
         }
         Row(
@@ -168,7 +168,7 @@ Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.body
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.dup, onCheckedChange = { vm.setDup(it) }, enabled = enabled)
         }
 

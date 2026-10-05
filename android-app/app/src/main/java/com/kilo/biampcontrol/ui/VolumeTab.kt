@@ -56,7 +56,7 @@ fun VolumeTab(vm: BiAmpViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.titleLarge)
 
         LabeledSlider(
             label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(),
