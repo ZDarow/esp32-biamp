@@ -50,9 +50,13 @@ Master в подчинённом режиме, склеивает их в оди
 
 Требуется ESP-IDF 6.0 (проверено на 6.0.2).
 
+Путь к ESP-IDF задаётся переменной окружения `IDF_PATH`, а активация
+окружения — `export.ps1` из каталога установки. Абсолютные пути в
+документации не приводятся намеренно: они работают только на одной машине.
+
 ```powershell
-& C:\esp\v6.0.2\esp-idf\export.ps1
-idf.py -C D:\BTBiAmp\firmware\capture build
+& "$env:IDF_PATH\export.ps1"
+idf.py -C firmware/capture build
 ```
 
 Результат: `firmware\capture\build\esp32_biamp_capture.bin`.
@@ -60,7 +64,7 @@ idf.py -C D:\BTBiAmp\firmware\capture build
 Прозшив:
 
 ```powershell
-idf.py -C D:\BTBiAmp\firmware\capture -p COMx flash
+idf.py -C firmware/capture -p COMx flash
 ```
 
 ## Два USB-порта платы
@@ -113,7 +117,8 @@ DMA может поймать половину кадра, и один сдви�
 ## Анализ на ПК
 
 ```powershell
-py -3.14 D:\BTBiAmp\firmware\tools\capture-analyze.py --analyze capture.bin --scenario sweep
+# Команды даны от корня репозитория
+py -3.14 firmware/tools/capture-analyze.py --analyze capture.bin --scenario sweep
 ```
 
 Сценарии: `dup` (дублирование канала), `silence`, `tone-low`, `tone-high`,
