@@ -21,6 +21,18 @@
     <string name="conn_state_reconnecting">Reconnecting…</string>
     <string name="conn_state_off">Disconnected, tap to connect</string>
 
+    <!-- Connection overlay -->
+    <string name="conn_overlay_connect">Connecting to amplifier…</string>
+    <string name="conn_overlay_reconnect">Reconnecting…</string>
+    <string name="conn_overlay_cancel">Cancel</string>
+    <string name="conn_overlay_pick">Other device</string>
+
+    <!-- Manual amplifier address -->
+    <string name="mac_label">Amplifier address</string>
+    <string name="mac_hint">AA:BB:CC:DD:EE:FF</string>
+    <string name="mac_invalid">Six octets, e.g. 68:09:47:86:5C:38</string>
+    <string name="mac_connect">Connect by address</string>
+
     <!-- Device picker -->
     <string name="device_picker_title">Select device</string>
     <string name="device_picker_empty">No paired devices.\nPair the phone with ESP32 BiAmp Speaker in Bluetooth settings first.</string>

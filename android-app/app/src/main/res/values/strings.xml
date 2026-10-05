@@ -25,6 +25,18 @@
     <string name="conn_state_reconnecting">Переподключение…</string>
     <string name="conn_state_off">Отключено, нажмите чтобы подключить</string>
 
+    <!-- Оверлей подключения -->
+    <string name="conn_overlay_connect">Подключение к усилителю…</string>
+    <string name="conn_overlay_reconnect">Переподключение…</string>
+    <string name="conn_overlay_cancel">Отмена</string>
+    <string name="conn_overlay_pick">Другое устройство</string>
+
+    <!-- Ручной ввод адреса усилителя -->
+    <string name="mac_label">Адрес усилителя</string>
+    <string name="mac_hint">AA:BB:CC:DD:EE:FF</string>
+    <string name="mac_invalid">Шесть октетов, например 68:09:47:86:5C:38</string>
+    <string name="mac_connect">Подключить по адресу</string>
+
     <!-- Окно выбора устройства -->
     <string name="device_picker_title">Выберите устройство</string>
     <string name="device_picker_empty">Нет сопряжённых устройств.\nСначала спарьте телефон с ESP32 BiAmp Speaker в настройках Bluetooth.</string>
@@ -105,7 +117,7 @@
     <string name="eq_reset_cd">%1$s, сброс в 0 дБ</string>
     <string name="band_title">Полосы — подстройка полосы</string>
     <string name="band_caption">Дополнительные фильтры и уровень одной полосы поверх общего кроссовера. Применяются после него, поэтому могут только сузить диапазон полосы, но не расширить его за Fc.</string>
-<string name="lr_swap">Перестановка Л/П</string>
+    <string name="lr_swap">Перестановка Л/П</string>
     <string name="lr_swap_caption">Меняет выходы усилителя местами, если левый канал слышен в правом динамике. Провода трогать не нужно.</string>
     <string name="lr_switch">Поменять каналы местами</string>
 

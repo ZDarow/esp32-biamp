@@ -157,6 +157,34 @@ constructor(app: Application) : this(app, { SppManager(it) })
     }
 
     /**
+     * Подключение по введённому вручную адресу.
+     *
+     * Единственный способ добраться до усилителя, который не сопряжён с
+     * этим телефоном: Android показывает в списке только сопряжённые
+     * устройства, а прошивка не пишет MAC в NVS и не восстанавливает его
+     * после сброса — то есть после «заводского сброса» телефон о нём
+     * забывает. Адрес приходится вводить руками.
+     *
+     * Невалидный адрес и отсутствие адаптера дают `false`: вызывающий
+     * покажет сообщение сам, ViewModel не занимается диалогами.
+     */
+    @SuppressLint("MissingPermission")
+    fun connectByAddress(context: Context, input: String): Boolean {
+        val mac = MacAddress.normalize(input) ?: return false
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
+            .adapter ?: return false
+        val dev = try {
+            adapter.getRemoteDevice(mac)
+        } catch (_: IllegalArgumentException) {
+            return false
+        } catch (_: SecurityException) {
+            return false
+        }
+        connect(dev)
+        return true
+    }
+
+    /**
      * Явное отключение по кнопке пользователя. Оно же выключает автоподключение:
      * иначе при следующем старте приложение снова подключилось бы само и
      * отключение выглядело бы неработающим. Включается обратно тумблером
