@@ -24,6 +24,11 @@
 package com.kilo.biampcontrol.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -97,14 +102,22 @@ Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.tit
 
         Text(stringResource(R.string.section_transport), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { vm.transport("prev") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_prev), null)) { Text("⏮") }
-            OutlinedButton(onClick = { vm.transport("play") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_play), null)) { Text("▶") }
-            OutlinedButton(onClick = { vm.transport("pause") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_pause), null)) { Text("⏸") }
-            OutlinedButton(onClick = { vm.transport("next") }, enabled = enabled,
-                           modifier = Modifier.semanticsMerge(stringResource(R.string.cd_next), null)) { Text("⏭") }
+            val transports = listOf(
+                ActionCatalog.Transport.PREV to Icons.Default.SkipPrevious,
+                ActionCatalog.Transport.PLAY to Icons.Default.PlayArrow,
+                ActionCatalog.Transport.PAUSE to Icons.Default.Pause,
+                ActionCatalog.Transport.NEXT to Icons.Default.SkipNext
+            )
+            transports.forEach { (action, icon) ->
+                TransportButton(
+                    icon = icon,
+                    contentDescription = stringResource(action.contentDescription),
+                    onClick = { vm.transport(action.command) },
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled,
+                    emphasized = action == ActionCatalog.Transport.PLAY
+                )
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -118,10 +131,12 @@ Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.tit
                 stringResource(R.string.preset_party)
             )
             presets.forEachIndexed { i, name ->
-                OutlinedButton(
-                    onClick = { vm.preset(i) }, enabled = enabled,
-                    modifier = Modifier.weight(1f)
-                ) { Text(name, maxLines = 1) }
+                ChoiceButton(
+                    label = name,
+                    onClick = { vm.preset(i) },
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled
+                )
             }
         }
     }

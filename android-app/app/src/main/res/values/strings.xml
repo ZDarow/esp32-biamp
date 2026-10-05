@@ -57,8 +57,14 @@
     <string name="service_title">Сервис</string>
     <string name="section_speaker_test">Тест динамиков</string>
     <string name="test_all">Все</string>
+    <string name="test_left">Зона Л</string>
+    <string name="test_right">Зона П</string>
     <string name="test_low">НЧ</string>
     <string name="test_high">ВЧ</string>
+    <string name="test_ch1">канал 1</string>
+    <string name="test_ch2">канал 2</string>
+    <string name="test_ch3">канал 3</string>
+    <string name="test_ch4">канал 4</string>
     <string name="test_anti">Анти</string>
     <string name="test_sweep">Свип</string>
     <string name="test_off">СТОП</string>
@@ -126,5 +132,8 @@
     <string name="swap_switch">Перестановка L/R</string>
     <string name="dup_switch">Дублировать на 2, 3</string>
     <string name="dup_warning">DUP: 1 — каналы 2 и 3 физически молчат. Восстановить</string>
+
+    <!-- Документация в шторке: подсказка под заголовком. -->
+    <string name="docs_sheet_hint">Потяните шторку вниз или нажмите крестик, чтобы закрыть</string>
 
 </resources>

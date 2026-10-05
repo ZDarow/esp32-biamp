@@ -54,8 +54,14 @@
     <string name="service_title">Service</string>
     <string name="section_speaker_test">Speaker test</string>
     <string name="test_all">All</string>
+    <string name="test_left">Zone L</string>
+    <string name="test_right">Zone R</string>
     <string name="test_low">LF</string>
     <string name="test_high">HF</string>
+    <string name="test_ch1">ch 1</string>
+    <string name="test_ch2">ch 2</string>
+    <string name="test_ch3">ch 3</string>
+    <string name="test_ch4">ch 4</string>
     <string name="test_anti">Anti</string>
     <string name="test_sweep">Sweep</string>
     <string name="test_off">STOP</string>
@@ -123,5 +129,8 @@
     <string name="swap_switch">Swap L/R</string>
     <string name="dup_switch">Duplicate to 2, 3</string>
     <string name="dup_warning">DUP: 1 - channels 2 and 3 are physically silent. Restore</string>
+
+    <!-- Documentation sheet: hint under the title. -->
+    <string name="docs_sheet_hint">Drag the sheet down or tap the cross to close</string>
 
 </resources>
