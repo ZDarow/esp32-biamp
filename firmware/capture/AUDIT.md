@@ -245,19 +245,29 @@ Z1 пропали: 0 щелчков на 4 захватах (2 с + 3×6 с).
 
 ## 9. Как воспроизвести
 
+Команды даны от корня репозитория. Путь к ESP-IDF берётся из переменной окружения
+`IDF_PATH` — в примере ниже предполагается, что окружение уже активировано
+(`export.ps1` из каталога установки ESP-IDF, либо `idf.py` в `PATH`).
+
 ```powershell
 # Сборка и прошивка сниффера
-& C:\esp\v6.0.2\esp-idf\export.ps1
-idf.py -C D:\BTBiAmp\firmware\capture build
-idf.py -C D:\BTBiAmp\firmware\capture -p COM11 flash
+idf.py -C firmware/capture build
+idf.py -C firmware/capture -p COM11 flash
 
-# Захват и разбор одного сценария
-py -3.14 D:\BTBiAmp\firmware\tools\capture-analyze.py `
+# Захват и разбор одного сценария: COM12 — сниффер на S3, COM8 — Master
+py -3.14 firmware/tools/capture-analyze.py `
   --sniffer COM12 --master COM8 --scenario dup
 
 # Разбор готового файла без платы
-py -3.14 D:\BTBiAmp\firmware\tools\capture-analyze.py `
-  --analyze captures\dup-…\capture.bin --scenario dup
+py -3.14 firmware/tools/capture-analyze.py `
+  --analyze captures/dup-…/capture.wav --scenario dup
+```
+
+Математика DSP проверяется без железа и без ESP32 — обычным компилятором:
+
+```powershell
+cd firmware/tests
+make test-host          # или: gcc -O2 -Wall -o g.exe golden_biquad.c -lm; .\g.exe
 ```
 
 ---
@@ -267,8 +277,14 @@ py -3.14 D:\BTBiAmp\firmware\tools\capture-analyze.py `
 | Файл | Роль |
 |---|---|
 | `main/capture_pins.h` | выводы S3 (6 констант) |
+| `main/capture_proto.h` | константы формата кадра; те же числа читает анализатор |
 | `main/capture_main.c` | прошивка сниффера |
+| `sdkconfig.defaults` | параметры сборки; `sdkconfig` создаётся из них и не коммитится |
 | `README.md` | документация сниффера, протокол, формат файла |
 | `../tools/capture-analyze.py` | анализатор на ПК |
+| `../tests/golden_*.c` | host-тесты DSP, ловят регрессии формул без железа |
 | `../ESP32_BiAmp/ESP32_BiAmp.ino` | источник истины по протоколу Master |
 | `../../captures/` | результаты захватов (wav, report.md, report.json) |
+
+Каталог `captures/` исключён из репозитория: сценарии дают около 83 МБ сырых отсчётов,
+а выводы зафиксированы в §5 этого документа. Воспроизведение — §9.
