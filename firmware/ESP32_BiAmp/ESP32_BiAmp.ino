@@ -324,7 +324,7 @@ void calcSectionTo(float out_cb[][3], float out_ca[][2],
     b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A;
     a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A;
   } else {
-    float A = powf(10, db / 20.0f), sqA = 2 * sqrtf(A) * alpha;
+    float A = powf(10, db / 40.0f), sqA = alpha * sqrtf(A * (A + 1));
     if (type == 3) {
       b0 = A * ((A + 1) - (A - 1) * cw + sqA);
       b1 = 2 * A * ((A - 1) - (A + 1) * cw);
