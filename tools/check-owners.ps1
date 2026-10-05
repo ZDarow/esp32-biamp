@@ -101,10 +101,16 @@ if (-not ($ownerRulesAll.Keys | Where-Object { $_.TrimStart('/') -eq '*' })) {
     $problems += "В CODEOWNERS отсутствует catch-all '*' — новые файлы получат владельца по умолчанию без явного назначения"
 }
 
-# Нормализует паттерн: убирает ведущий / и trailing /*.
+# Нормализует паттерн: убирает ведущий /, trailing /* и завершающий /.
+#
+# Завершающий слэш убирается тоже: иначе 'firmware/capture/' (CODEOWNERS) и
+# 'firmware/capture/*' (хук) нормализуются в разные строки, и сверка объявит
+# расхождением то, что на самом деле означает одно и то же. Покрытие
+# подкаталога проверяется отдельно, в Get-CoveringOwner.
 function Normalize-Pattern([string]$p) {
     $p = $p.TrimStart('/')
     $p = $p -replace '\s*\*\s*$', ''
+    $p = $p.TrimEnd('/')
     return $p
 }
 
@@ -116,26 +122,34 @@ function Get-CoveringOwner([string]$path, [hashtable]$rules) {
     foreach ($rule in $rules.Keys) {
         if ((Normalize-Pattern $rule) -eq $needle) { return $rules[$rule] }
     }
+    $best = $null
+    $bestLen = -1
     foreach ($rule in $rules.Keys) {
         $r = Normalize-Pattern $rule
-        if ($r -and $r.EndsWith('/') -and $needle.StartsWith($r)) { return $rules[$rule] }
+        if (-not $r) { continue }
+        # Каталог покрывает и сам себя, и всё под ним. Проверка границы
+        # обязательна: без неё правило 'firmware/capture' накрыло бы и
+        # 'firmware/captures-backup/', которого оно не касается.
+        if (($needle -eq $r -or $needle.StartsWith($r + '/')) -and $r.Length -gt $bestLen) {
+            $best = $rules[$rule]
+            $bestLen = $r.Length
+        }
     }
-    return $null
+    return $best
 }
 
 # Покрыт ли путь набором правил: правило совпадает само с собой, покрывает
 # путь по префиксу, либо путь покрывает правило по своему префиксу.
-# CODEOWNERS пишет с ведущим слэшем ('/firmware/'), хук — без ('firmware/*'),
-# поэтому слэш нормализуется, а 'docs/' покрывает 'docs/*'.
+# Нормализация общая с Get-CoveringOwner, граница префикса проверяется
+# явно — иначе 'firmware/capture' считалось бы покрывающим
+# 'firmware/captures-backup/', и пропущенный путь прошёл бы сверку.
 function Test-Covered([string]$path, [hashtable]$rules) {
-    $needle = $path.TrimStart('/')
+    $needle = (Normalize-Pattern $path) -replace '\*$', ''
     foreach ($rule in $rules.Keys) {
-        $r = $rule.TrimStart('/')
-        $rBase = $r -replace '\*$', ''
-        $nBase = $needle -replace '\*$', ''
+        $r = (Normalize-Pattern $rule) -replace '\*$', ''
+        if (-not $r -or -not $needle) { continue }
         if ($needle -eq $r) { return $true }
-        if ($rBase -and $nBase.StartsWith($rBase)) { return $true }
-        if ($nBase -and $rBase.StartsWith($nBase)) { return $true }
+        if ($needle.StartsWith($r + '/') -or $r.StartsWith($needle + '/')) { return $true }
     }
     return $false
 }

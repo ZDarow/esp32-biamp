@@ -5,10 +5,12 @@
 # чужие файлы, а не разнесением веток.
 #
 # Владелец определяется по имени текущей ветки:
-#   firmware/*, firmware-dev  -> firmware
-#   android/*,  android-dev   -> android
-#   pc-client/*, pc-client-dev -> pc-client
-#   main, master, feature/*   -> проверка не выполняется
+#   firmware/*, firmware-dev    -> firmware
+#   android/*,  android-dev     -> android
+#   web/*,     web-dev         -> web
+#   verify/*,  verify-dev      -> verify
+#   pc-client/*, pc-client-dev  -> web  (историческое имя ветки)
+#   main, master, feature/*     -> проверка не выполняется
 #
 # Общие файлы (README, AGENTS, CONTRIBUTING, docs/, .githooks/) править
 # можно из любой ветки: они иначе и были бы источником конфликтов.
@@ -28,16 +30,29 @@ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 case "$branch" in
 	firmware | firmware/* | firmware-*) owner="firmware" ;;
 	android | android/* | android-*) owner="android" ;;
-	pc-client | pc-client/* | pc-client-*) owner="pc-client" ;;
+	web | web/* | web-*) owner="web" ;;
+	# Ветка называлась pc-client-dev, когда направление называлось «клиент ПК».
+	# Имя ветки оставлено как есть, чтобы не терять её историю и ссылки.
+	pc-client | pc-client/* | pc-client-*) owner="web" ;;
+	verify | verify/* | verify-*) owner="verify" ;;
 	*) exit 0 ;;
 esac
 
-# Кто владеет путём: firmware | android | pc-client | shared | unknown
+# Кто владеет путём: firmware | android | web | verify | shared | unknown
+#
+# ПОРЯДОК ВАЖЕН: в case первый подошедший шаблон выигрывает, поэтому более
+# узкие правила стоят выше широких. Направлению проверок принадлежит
+# firmware/capture/, но firmware/** целиком принадлежит прошивке — без
+# более узкого правила первым совпал бы широкий, и проверки не смогли бы
+# править сниффер.
 path_owner() {
 	case "$1" in
+	firmware/capture/* | firmware/capture) echo "verify" ;;
+	firmware/tools/capture-analyze.py) echo "verify" ;;
+	.github/workflows/ci-verify.yml) echo "verify" ;;
 	firmware/* | SECURITY.md | .github/workflows/ci-firmware.yml) echo "firmware" ;;
 	android-app/* | .github/workflows/ci-android.yml) echo "android" ;;
-	pc-client/* | .github/workflows/ci-pc-client.yml) echo "pc-client" ;;
+	pc-client/* | .github/workflows/ci-pc-client.yml) echo "web" ;;
 	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE | NOTICE) echo "shared" ;;
 	.gitignore | .gitattributes | .editorconfig) echo "shared" ;;
 	docs/* | .githooks/* | tools/*) echo "shared" ;;
@@ -50,7 +65,8 @@ own_label() {
 	case "$1" in
 	firmware) echo "прошивка (firmware)" ;;
 	android) echo "приложение Android (android)" ;;
-	pc-client) echo "клиент ПК (pc-client)" ;;
+	web) echo "веб-панель и клиент ПК (web)" ;;
+	verify) echo "проверки и измерения (verify)" ;;
 	shared) echo "общий файл" ;;
 	*) echo "никем не описан" ;;
 	esac
