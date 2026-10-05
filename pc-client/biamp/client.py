@@ -41,20 +41,29 @@ class BiAmpClient:
 
     def read_status(self, timeout: float = STATUS_TIMEOUT) -> p.DeviceState:
         self.send(p.status())
-        lines: list[str] = []
+        block: list[str] = []
+        started = False
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             chunk = self._transport.read_lines(0.15)
             if not chunk:
-                if lines:
+                if block:
                     break
                 continue
-            lines.extend(chunk)
-            if any(p.is_block_end(line) for line in chunk):
+            ended = False
+            for line in chunk:
+                if p.is_block_start(line):
+                    block.clear()
+                    started = True
+                if started:
+                    block.append(line)
+                if p.is_block_end(line):
+                    ended = True
+            if ended:
                 break
-        state = p.parse_status(lines, base=self._last_state)
+        state = p.parse_status(block, base=self._last_state)
         if state is None:
-            preview = " | ".join(lines[:4]) if lines else "(нет ответа)"
+            preview = " | ".join(block[:4]) if block else "(нет ответа)"
             raise TransportError(f"не удалось разобрать status: {preview}")
         if state.unparsed_lines:
             raise TransportError(f"нераспознанные строки status: {' | '.join(state.unparsed_lines)}")
