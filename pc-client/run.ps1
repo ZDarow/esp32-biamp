@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Port = "COM14",
     [string]$Command = "status",
     # $Host — автоматическая переменная PowerShell, переопределять её нельзя.
