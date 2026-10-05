@@ -1,0 +1,68 @@
+name: 'CI: проверки и измерения'
+
+on:
+  push:
+    branches: [main, verify-dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Отменять предыдущий прогон при новом коммите в ту же ветку
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Файл принадлежит направлению verify — см. docs/BRANCHING.md.
+#
+# Направление проверок измеряет результат: сниффер firmware/capture/ и
+# анализатор firmware/tools/capture-analyze.py. Проверяется то, что можно
+# проверить без железа: компиляция и численный анализатор.
+jobs:
+  verify:
+    name: Проверки (сниффер и анализатор)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Установка Python и numpy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Установка зависимостей
+        run: python -m pip install --disable-pip-version-check numpy
+
+      # Сниффер — отдельная прошивка на ESP-IDF, а не Arduino-скетч, поэтому
+      # arduino-cli её не собирает. Сборка требует xtensa-тулчейна ESP32-S3 и
+      # занимает больше десяти минут, ради чего отдельный job не заведён.
+      # Проверка ниже ограничивается тем, что можно поймать без железа:
+      # синтаксис, самодиагностика сценариев и отсутствие абсолютных путей.
+      - name: Проверка синтаксиса анализатора
+        run: python -m py_compile firmware/tools/capture-analyze.py
+
+      - name: Самодиагностика анализатора
+        run: python firmware/tools/capture-analyze.py --list-scenarios
+
+      # Методика аудита и сниффер должны оставаться переносимыми: раньше в
+      # AUDIT.md попали локальные пути D:\BTBiAmp и C:\esp, из-за чего
+      # инструкция воспроизведения работала только на одной машине.
+      - name: Проверка переносимости методики
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rInE '[A-Za-z]:\\|/home/|/Users/' \
+            firmware/capture/AUDIT.md firmware/capture/README.md \
+            || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::В документации сниффера найдены абсолютные пути:"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "Абсолютных путей нет"
