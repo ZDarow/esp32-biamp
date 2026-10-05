@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -40,6 +40,15 @@ internal fun sliderStateText(pos: Float, steps: Int, suffix: String): String =
     (if (steps > 0) pos.roundToInt().toString()
      else String.format(Locale.US, "%.1f", pos)) + suffix.trim()
 
+/**
+ * Слайдер с подписью значения.
+ *
+ * Единственная копия значения, которую держит этот компонент, —
+ * `mutableFloatStateOf` ниже. Значение с устройства подтверждает её через
+ * [LaunchedEffect], а ползунок пишет прямо в неё. Раньше копий было три
+ * (`state` → `pos` → внутренняя `pos` у [CompactSlider]), и правка
+ * доезжала до `onValueChangeFinished` через две асинхронные ступени.
+ */
 @Composable
 fun LabeledSlider(
     label: String,
@@ -51,22 +60,25 @@ fun LabeledSlider(
     onValueChangeFinished: (Float) -> Unit
 ) {
     val state = remember { mutableFloatStateOf(value) }
-    LaunchedEffect(value) { state.value = value }
     LabeledSlider(label, state, range, enabled, suffix, steps, onValueChangeFinished)
 }
 
 @Composable
 fun LabeledSlider(
     label: String,
-    value: State<Float>,
+    value: MutableState<Float>,
     range: ClosedFloatingPointRange<Float>,
     enabled: Boolean,
     suffix: String = "",
     steps: Int = 0,
     onValueChangeFinished: (Float) -> Unit
 ) {
-    val pos = remember { mutableFloatStateOf(value.value) }
-    LaunchedEffect(value.value) { pos.value = value.value }
+    // Значение с устройства подтверждает локальное, но не наоборот: пока
+    // ответ не пришёл, положение ползунка остаётся тем, куда его довёл
+    // пользователь, иначе опрос status откатывал бы недосланную правку.
+    val remote = value.value
+    LaunchedEffect(remote) { value.value = remote }
+    val pos = value.value
 
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -76,7 +88,7 @@ fun LabeledSlider(
         ) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
             Text(
-                sliderStateText(pos.value, steps, suffix),
+                sliderStateText(pos, steps, suffix),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -85,14 +97,14 @@ fun LabeledSlider(
         // (minimumInteractiveComponentSize центрирует трек и ужимает занятую высоту).
         Row(Modifier.fillMaxWidth().height(28.dp)) {
             CompactSlider(
-                value = pos.value,
-                onValueChange = { pos.value = it },
-                onValueChangeFinished = { onValueChangeFinished(pos.value) },
+                value = pos,
+                onValueChange = { value.value = it },
+                onValueChangeFinished = { onValueChangeFinished(value.value) },
                 valueRange = range,
                 steps = steps,
                 enabled = enabled,
                 contentDescription = label,
-                stateDescriptionText = sliderStateText(pos.value, steps, suffix),
+                stateDescriptionText = sliderStateText(pos, steps, suffix),
                 modifier = Modifier.fillMaxWidth()
             )
         }

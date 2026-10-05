@@ -3,7 +3,7 @@
  *
  * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
  * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Формат команд и ответов — в firmware/protocol/status-contract.md, раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -30,19 +30,34 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kilo.biampcontrol.bt.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
+/**
+ * @param createClient фабрика соединения. Продлена параметром со значением
+ *   по умолчанию ради instrumented-тестов: без сопряжённого ESP32 реальный
+ *   [SppManager] не может подключиться, а проверять нужно поведение ViewModel
+ *   поверх заглушки. Приложение пользуется этим конструктором через
+ *   `by viewModels()`: фабрика AndroidViewModel умеет только его.
+ */
+class BiAmpViewModel internal constructor(
+    app: Application,
+    createClient: (CoroutineScope) -> SppClient
+) : AndroidViewModel(app) {
 
-    private val spp = SppManager(viewModelScope)
-    private val sender = CommandSender(spp, viewModelScope)
+constructor(app: Application) : this(app, { SppManager(it) })
+
+    private val spp: SppClient = createClient(viewModelScope)
+    // Цикл отправки живёт на Dispatchers.IO: синхронный write()/flush()
+    // на главном потоке — это прямой путь к ANR.
+    private val sender = CommandSender(spp, viewModelScope, io = Dispatchers.IO)
     private val prefs = DevicePrefs(app)
 
     val connState = spp.state
@@ -50,10 +65,17 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     val log = MutableStateFlow<List<String>>(emptyList())
     val devices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     val isSyncing = MutableStateFlow(false)
-    private val mute0 = MutableStateFlow(false)
-    private val mute1 = MutableStateFlow(false)
 
-    private val lineBuffer = ArrayDeque<String>()
+    /**
+     * Буфер строк блока `status`.
+     *
+     * Живёт отдельно от журнала: раньше обе строки шли в один `lineBuffer`, и
+     * многострочный вывод `help`/`stats`/`heap` (он идёт с `force = true` и
+     * печатается один раз, но на 40+ строк) вытеснял из буфера начало блока
+     * `status`. Парсер терял `V0=`, а вместе с ним громкость и баланс, и
+     * значения на экране «залипали» до следующего полного блока.
+     */
+    private val statusBuffer = ArrayDeque<String>()
 
     @Volatile private var syncRequestedAt = 0L
 
@@ -63,30 +85,50 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             spp.state.collect { state ->
                 if (state == ConnState.CONNECTED) {
-                    mute0.value = false
-                    mute1.value = false
                     // Ответ предыдущей сессии мог остаться в буфере: смешивать его
                     // с новым status нельзя, иначе UI покажет значения чужой сессии.
-                    lineBuffer.clear()
+                    statusBuffer.clear()
                     deviceState.value = DeviceState()
+                    // Команды, накопленные до обрыва, относятся к прежнему
+                    // устройству: на новом усилителе они выставили бы чужую
+                    // громкость. Очереди очищаются на обеих границах сессии.
+                    sender.clearQueues()
                     requestStatusSync()
                 } else if (state == ConnState.DISCONNECTED) {
                     isSyncing.value = false
+                    sender.clearQueues()
                 }
             }
         }
+        viewModelScope.launch { reportLostLines() }
+        viewModelScope.launch { reportLostCommands() }
         viewModelScope.launch { statusPollLoop() }
         viewModelScope.launch { syncWatchdog() }
+    }
+
+    /**
+     * Разрыв соединения при уничтожении ViewModel.
+     *
+     * Без этого `viewModelScope` отменяет циклы, а сокет остаётся открытым:
+     * устройство думает, что клиент на связи, и следующая попытка
+     * подключения упирается в занятый канал RFCOMM.
+     */
+    override fun onCleared() {
+        spp.disconnect()
+        sender.clearQueues()
+        super.onCleared()
     }
 
     /** Ставит флаг синхронизации и отправляет `status`. Единственная точка входа. */
     private fun requestStatusSync() {
         isSyncing.value = true
         syncRequestedAt = System.currentTimeMillis()
-        // Буфер очищается ДО отправки: недобранный хвост прошлого опроса
-        // не должен смешаться с новым блоком, иначе в состояние попадут
-        // значения двух разных моментов времени.
-        lineBuffer.clear()
+        // Буфер НЕ очищается здесь: он чистится по первой строке пришедшего
+        // блока ([StatusParser.isBlockStart]). Очистка здесь обрезала блок,
+        // который уже идёт от усилителя, если запрос пришёл в его середину:
+        // в буфере оставался хвост без начала, и часть полей состояния
+        // оставалась прежней. Остаток прошлой сессии очищается при CONNECTED
+        // и после разбора полного блока.
         sender.send("status", true)
     }
 
@@ -140,8 +182,16 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
         _autoConnect.value = on
     }
 
-    /** Забыть устройство: адрес, имя и автоподключение. */
+    /**
+     * Забыть устройство: адрес, имя и автоподключение.
+     *
+     * Разрыв соединения обязателен: забытый адрес остаётся в памяти усилителя
+     * как активная сессия, и приложение продолжило бы слать команды устройству,
+     * о котором пользователь забыл, до ручного «Откл.».
+     */
     fun forgetDevice() {
+        setAutoConnect(false)
+        spp.disconnect()
         prefs.forget()
         _autoConnect.value = prefs.autoConnect
     }
@@ -170,20 +220,26 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     fun setVol0(v: Int, force: Boolean = false) = sender.send("v0:$v", force)
     fun setVol1(v: Int, force: Boolean = false) = sender.send("v1:$v", force)
     fun setBal(v: Int, force: Boolean = false) = sender.send("bal:$v", force)
+
+    /**
+     * Mute как абсолютная установка.
+     *
+     * Прошивка v35.1 различает `mute:<z>` (переключатель, аргумент игнорируется)
+     * и `mute:<z>:<0|1>` (установка). Старый клиентский `toggleMute` слал
+     * `mute:0` и одновременно переворачивал ЛОКАЛЬНЫЙ флаг, а состояние
+     * обновлялось только следующим блоком `status` — между нажатием и ответом
+     * индикатор врал, а при потерянном ответе оставался врёным навсегда.
+     * Теперь цель вычисляется из прочитанного `Mute: z0/z1` и подтверждается
+     * только реальным статусом: [deviceState] — единственный источник истины.
+     */
     fun toggleMute(z: Int) {
-        when (z) {
-            0 -> {
-                mute0.update { !it }
-                sender.send("mute:0", true)
-            }
-            1 -> {
-                mute1.update { !it }
-                sender.send("mute:1", true)
-            }
-        }
+        if (z != 0 && z != 1) return
+        val target = if (isMuted(z)) 0 else 1
+        sender.send("mute:$z:$target", true)
     }
-    val isMuted0 = mute0
-    val isMuted1 = mute1
+
+    /** Прочитанное состояние зоны [z]; неизвестная зона — не заглушена. */
+    fun isMuted(z: Int): Boolean = deviceState.value.muted.getOrElse(z) { false }
 
     // ── DSP ─────────────────────────────────────────────────────
     fun setFc(v: Int, force: Boolean = false) = sender.send("fc:$v", force)
@@ -192,10 +248,23 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     fun setTlf(v: Float, force: Boolean = false) = sender.send("tlf:${fmt(v)}", force)
     fun setThf(v: Float, force: Boolean = false) = sender.send("thf:${fmt(v)}", force)
     val eqPrefixes = listOf("eql", "eqm", "eqh")
-    fun setEq(band: Int, v: Int, force: Boolean = false) =
-        sender.send("${eqPrefixes[band]}:$v", force)
-    fun toggleInv(ch: Int) = sender.send("inv:$ch", true)
-    fun invOff() = sender.send("inv:off", true)
+/** Полоса вне 0..2 игнорируется: `getOrNull`, а не исключение из List. */
+    fun setEq(band: Int, v: Int, force: Boolean = false) {
+        val prefix = eqPrefixes.getOrNull(band) ?: return
+        sender.send("$prefix:$v", force)
+    }
+
+    /** Перестановка Л/П (строка `SWP:` контракта). */
+    fun setSwap(on: Boolean) = sender.send("swap:${if (on) 1 else 0}", true)
+
+    /**
+     * Дублирование выхода на каналы 2,3 (строка `DUP:` контракта).
+     *
+     * При `DUP: 1` каналы 2 и 3 физически молчат: предупреждение обязано быть
+     * на экране, иначе пользователь ищет неисправность там, где она не в
+     * усилителе.
+     */
+    fun setDup(on: Boolean) = sender.send("dup:${if (on) 1 else 0}", true)
     fun preset(p: Int) = sender.send("preset:$p", true)
 
     // ── DSP v18: кроссовер, поканальные фильтры ───────────────────
@@ -207,6 +276,10 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     fun setChHp(ch: Int, freq: Int) = sender.send("chhp:$ch:$freq", false)
     fun setChLp(ch: Int, freq: Int) = sender.send("chlp:$ch:$freq", false)
 
+    // ── Прошивка v35: перестановка выходов Л/П вместо инверсии фазы ──
+    /** Синоним [setSwap]: UI перестановки Л/П называет команду так же. */
+    fun setLrSwap(on: Boolean) = setSwap(on)
+
     // ── Транспорт / тесты / сервис ──────────────────────────────
     fun transport(k: String) = sender.send(k, true)      // play/pause/next/prev
     fun startTest(mode: String) = sender.send("test:$mode", true)
@@ -215,27 +288,65 @@ class BiAmpViewModel(app: Application) : AndroidViewModel(app) {
     fun reboot() = sender.send("reboot", true)
     fun factoryReset() = sender.send("factory", true)
 
-    fun setTestVol(v: Int) = sender.send("tvol:$v", false)
+    fun setTestVol(v: Int) = sender.send("tvol:${v.coerceIn(Limits.TEST_VOL_MIN, Limits.TEST_VOL_MAX)}", false)
 
     fun sendDiagnostic(cmd: String) = sender.send(cmd, true)
 
     // ── Приём ───────────────────────────────────────────────────
     private fun onLine(line: String) {
-        lineBuffer.addLast(line)
-        if (lineBuffer.size > STATUS_LINES) lineBuffer.removeFirst()
-        // Разбор идёт поверх текущего состояния, а не поверх значений по
-        // умолчанию: блок status приходит одиннадцатью строками, и на первых
-        // десяти в буфере ещё нет, например, строки Delay. Разбор с нуля
-        // обнулял бы эти поля, и ползунки прыгали бы к дефолту и обратно.
-        StatusParser.parse(lineBuffer, deviceState.value)?.let {
-            deviceState.value = it
-            // Полный блок status разобран — синхронизация завершена.
-            if (isSyncing.value) isSyncing.value = false
-            // Блок разобран целиком: очищаем буфер, чтобы следующий опрос
-            // не смешался с предыдущим наполовину.
-            if (StatusParser.isBlockEnd(line)) lineBuffer.clear()
+        // Политика буфера (обнуление на начале блока, отбрасывание лишнего)
+        // живёт в парсере: здесь только накопление и разбор.
+        val blockStarted = StatusParser.appendToBlock(statusBuffer, line, STATUS_LINES)
+        if (blockStarted || StatusParser.isStatusLine(line)) {
+            // Разбор идёт поверх текущего состояния, а не поверх значений по
+            // умолчанию: блок status приходит 13 строками, и на первых
+            // двенадцати в буфере ещё нет, например, строки Delay. Разбор с
+            // нуля обнулял бы эти поля, и ползунки прыгали бы к дефолту и обратно.
+            val r = StatusParser.parseDetailed(statusBuffer, deviceState.value)
+            r.state?.let {
+                deviceState.value = it
+                // Полный блок status разобран — синхронизация завершена.
+                if (isSyncing.value) isSyncing.value = false
+                // Блок разобран целиком: очищаем буфер, чтобы следующий опрос
+                // не смешался с предыдущим наполовину.
+                if (StatusParser.isBlockEnd(line)) statusBuffer.clear()
+            }
         }
         log.value = (log.value + line).takeLast(LOG_LINES)
+    }
+
+    /**
+     * Потери на транспорте — в журнал.
+     *
+     * Строка SPP, отброшенная переполненным буфером, и команда, отброшенная
+     * переполненной очередью, не возвращаются: приложение обязано сказать об
+     * этом пользователю, иначе «залипшие» значения выглядят как поломка
+     * усилителя.
+     */
+    private suspend fun reportLostLines() {
+        var lastSpp = 0L
+        var lastCmd = 0
+        spp.droppedLines.collect { n ->
+            if (n > lastSpp) {
+                note("! потеряно строк от усилителя: ${n - lastSpp} (всего $n)")
+                lastSpp = n
+            }
+        }
+    }
+
+    private suspend fun reportLostCommands() {
+        var last = 0
+        sender.dropped.collect { n ->
+            if (n > last) {
+                note("! потеряно команд усилителю: ${n - last} (всего $n)")
+                last = n
+            }
+        }
+    }
+
+    /** Служебная строка журнала — с восклицательным знаком, чтобы её искали. */
+    private fun note(msg: String) {
+        log.value = (log.value + msg).takeLast(LOG_LINES)
     }
 
     private suspend fun statusPollLoop() {

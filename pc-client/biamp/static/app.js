@@ -6,6 +6,10 @@ const state = { current: null, busy: false };
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// Токен подставляет сервер в <head> при отдаче index.html. Без него
+// /api/* отвечает 403, поэтому запросы без токена бесполезны.
+const TOKEN = (document.querySelector('meta[name="biamp-token"]') || {}).content || "";
+
 function showError(message) {
   const box = $("#error");
   box.textContent = message;
@@ -27,6 +31,11 @@ function format(field, value) {
   }
   if (field === "test_volume") return value + " %";
   return String(value);
+}
+
+function showDupWarning(active) {
+  const box = $("#dup-warn");
+  if (box) box.hidden = !active;
 }
 
 function buildChannels(state) {
@@ -72,14 +81,6 @@ function buildChannels(state) {
     dl.append(dlIn);
     tr.append(dl);
 
-    const inv = document.createElement("td");
-    const invIn = document.createElement("input");
-    invIn.type = "checkbox";
-    invIn.checked = Boolean(state.inverted[i]);
-    invIn.dataset.field = "inv" + i;
-    inv.append(invIn);
-    tr.append(inv);
-
     body.append(tr);
   });
 }
@@ -95,17 +96,19 @@ function fill(state) {
     if (out) out.textContent = format(field, state[field]);
   });
   buildChannels(state);
+  showDupWarning(Boolean(state.dup_out));
   setLink("подключено", "ok");
 }
 
 async function api(path, body) {
+  const headers = { "X-BiAmp-Token": TOKEN };
   const options = body
     ? {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: Object.assign({ "Content-Type": "application/json" }, headers),
         body: JSON.stringify(body),
       }
-    : {};
+    : { headers };
   const response = await fetch(path, options);
   const data = await response.json();
   if (!response.ok || data.ok === false) {
@@ -149,6 +152,7 @@ document.addEventListener("input", (event) => {
   const field = el.dataset.field;
   if (!field) return;
   const value = el.type === "checkbox" ? el.checked : el.value;
+  if (field === "dup_out") showDupWarning(el.checked);
   const out = $('[data-out="' + field + '"]');
   if (out) out.textContent = format(field, value);
   pushField(field, value);
@@ -156,7 +160,10 @@ document.addEventListener("input", (event) => {
 
 document.addEventListener("change", (event) => {
   const el = event.target;
-  if (el.dataset.field) pushField(el.dataset.field, el.type === "checkbox" ? el.checked : el.value);
+  if (!el.dataset.field) return;
+  const value = el.type === "checkbox" ? el.checked : el.value;
+  if (el.dataset.field === "dup_out") showDupWarning(el.checked);
+  pushField(el.dataset.field, value);
 });
 
 document.addEventListener("click", async (event) => {
@@ -186,7 +193,13 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-refresh();
+if (!TOKEN) {
+  showError("Токен доступа не подставлен: страница открыта не через сервер панели.");
+  setLink("нет доступа", "bad");
+} else {
+  refresh();
+}
+
 setInterval(() => {
-  if (!state.busy) refresh();
+  if (!state.busy && TOKEN) refresh();
 }, 15000);

@@ -5,10 +5,11 @@ import queue
 import socket
 import threading
 import time
-from typing import Final
+from typing import Any, Final
 
 DEFAULT_BAUD: Final[int] = 115200
 READ_CHUNK: Final[int] = 4096
+MAX_PENDING_CHARS: Final[int] = 65536
 
 
 class TransportError(RuntimeError):
@@ -19,9 +20,7 @@ def list_serial_ports() -> list[str]:
     try:
         from serial.tools import list_ports
     except ImportError as exc:
-        raise TransportError(
-            "не установлен pyserial — выполните: pip install -r requirements.txt"
-        ) from exc
+        raise TransportError("не установлен pyserial — выполните: pip install -r requirements.txt") from exc
     return [p.device for p in list_ports.comports()]
 
 
@@ -30,6 +29,8 @@ class LineTransport(abc.ABC):
         self._lines: queue.Queue[str] = queue.Queue()
         self._pending = ""
         self._closed = threading.Event()
+        self._disconnected = threading.Event()
+        self._last_error: str = ""
         self._thread: threading.Thread | None = None
 
     @abc.abstractmethod
@@ -38,9 +39,20 @@ class LineTransport(abc.ABC):
     @abc.abstractmethod
     def close(self) -> None: ...
 
+    @abc.abstractmethod
+    def _reconnect(self) -> None: ...
+
     @property
     @abc.abstractmethod
     def description(self) -> str: ...
+
+    @property
+    def is_connected(self) -> bool:
+        return not self._disconnected.is_set()
+
+    @property
+    def last_error(self) -> str:
+        return self._last_error
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._pump, daemon=True)
@@ -60,10 +72,19 @@ class LineTransport(abc.ABC):
         return collected
 
     def send_line(self, command: str) -> None:
+        if self._disconnected.is_set():
+            raise TransportError(f"транспорт отключён: {self._last_error}")
         self.write(command.encode("utf-8") + b"\n")
 
     def _feed(self, text: str) -> None:
         self._pending += text
+        if len(self._pending) > MAX_PENDING_CHARS and "\n" not in self._pending and "\r" not in self._pending:
+            self._last_error = (
+                f"входящая строка длиннее {MAX_PENDING_CHARS} символов без перевода строки — буфер сброшен"
+            )
+            self._disconnected.set()
+            self._pending = ""
+            raise TransportError(self._last_error)
         while "\n" in self._pending or "\r" in self._pending:
             cut = min(
                 (self._pending.find(c) for c in "\r\n" if self._pending.find(c) >= 0),
@@ -72,14 +93,34 @@ class LineTransport(abc.ABC):
             line = self._pending[:cut]
             self._pending = self._pending[cut + 1 :]
             if line.strip():
-                self._lines.put(line)
+                self._lines.put(line[:MAX_PENDING_CHARS])
 
     def _pump(self) -> None:
+        backoff = 0.05
         while not self._closed.is_set():
             try:
                 data = self._read()
-            except Exception:
-                break
+                backoff = 0.05
+            except TransportError as exc:
+                self._last_error = str(exc)
+                self._disconnected.set()
+                if self._closed.is_set():
+                    break
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+                try:
+                    self._reconnect()
+                    self._disconnected.clear()
+                    self._last_error = ""
+                except Exception as exc:
+                    self._last_error = f"переподключение не удалось: {exc}"
+                continue
+            except Exception as exc:
+                self._last_error = f"ошибка приёма: {exc}"
+                if self._closed.is_set():
+                    break
+                time.sleep(0.1)
+                continue
             if data:
                 self._feed(data.decode("utf-8", errors="replace"))
             else:
@@ -95,6 +136,10 @@ class SerialTransport(LineTransport):
         super().__init__()
         self._port_name = port
         self._baud = baud
+        self._timeout = timeout
+        self._serial = self._open_serial()
+
+    def _open_serial(self) -> Any:
         try:
             import serial
         except ImportError as exc:
@@ -102,20 +147,34 @@ class SerialTransport(LineTransport):
                 "не установлен pyserial — выполните: pip install -r requirements.txt"
             ) from exc
         try:
-            self._serial = serial.Serial(port, baud, timeout=timeout)
+            return serial.Serial(self._port_name, self._baud, timeout=self._timeout)
         except Exception as exc:
-            raise TransportError(f"не удалось открыть {port} @ {baud}: {exc}") from exc
+            raise TransportError(f"не удалось открыть {self._port_name} @ {self._baud}: {exc}") from exc
+
+    def _reconnect(self) -> None:
+        try:
+            self._serial.close()
+        except Exception:
+            pass
+        self._serial = self._open_serial()
 
     @property
     def description(self) -> str:
         return f"{self._port_name} @ {self._baud}"
 
     def _read(self) -> bytes:
-        waiting = self._serial.in_waiting
-        return self._serial.read(waiting or 1)
+        try:
+            waiting = self._serial.in_waiting
+            chunk: bytes = self._serial.read(waiting or 1)
+            return chunk
+        except Exception as exc:
+            raise TransportError(f"ошибка чтения {self._port_name}: {exc}") from exc
 
     def write(self, data: bytes) -> None:
-        self._serial.write(data)
+        try:
+            self._serial.write(data)
+        except Exception as exc:
+            raise TransportError(f"ошибка записи {self._port_name}: {exc}") from exc
 
     def close(self) -> None:
         self._closed.set()
@@ -129,11 +188,27 @@ class TcpTransport(LineTransport):
     def __init__(self, host: str, port: int) -> None:
         super().__init__()
         self._address = (host, port)
+        self._socket = self._open_socket()
+
+    def _open_socket(self) -> socket.socket:
         try:
-            self._socket = socket.create_connection(self._address, timeout=5)
+            sock = socket.create_connection(self._address, timeout=5)
         except OSError as exc:
+            host, port = self._address[0], self._address[1]
             raise TransportError(f"не удалось подключиться к {host}:{port}: {exc}") from exc
-        self._socket.settimeout(0.2)
+        sock.settimeout(0.2)
+        return sock
+
+    def _reconnect(self) -> None:
+        try:
+            self._socket.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self._socket.close()
+        except OSError:
+            pass
+        self._socket = self._open_socket()
 
     @property
     def description(self) -> str:
@@ -142,7 +217,7 @@ class TcpTransport(LineTransport):
     def _read(self) -> bytes:
         try:
             return self._socket.recv(READ_CHUNK)
-        except socket.timeout:
+        except TimeoutError:
             return b""
         except OSError as exc:
             raise TransportError(f"соединение потеряно: {exc}") from exc
@@ -159,16 +234,25 @@ class TcpTransport(LineTransport):
             self._socket.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-        self._socket.close()
+        try:
+            self._socket.close()
+        except OSError:
+            pass
 
 
 def open_transport(target: str, baud: int = DEFAULT_BAUD) -> LineTransport:
     if target.startswith("tcp://"):
         rest = target[len("tcp://") :]
-        host, _, port = rest.partition(":")
-        if not port:
-            raise TransportError("формат tcp://хост:порт")
-        return TcpTransport(host, int(port))
+        host, sep, port = rest.rpartition(":")
+        if not sep or not host:
+            raise TransportError(f"формат tcp://хост:порт, получено {target!r}")
+        try:
+            number = int(port)
+        except ValueError as exc:
+            raise TransportError(f"порт {port!r} не число") from exc
+        if not (1 <= number <= 65535):
+            raise TransportError(f"порт {number} вне диапазона 1..65535")
+        return TcpTransport(host, number)
     return SerialTransport(target, baud)
 
 
@@ -182,6 +266,9 @@ class LoopbackTransport(LineTransport):
     @property
     def description(self) -> str:
         return "loopback"
+
+    def _reconnect(self) -> None:
+        pass
 
     def _read(self) -> bytes:
         try:

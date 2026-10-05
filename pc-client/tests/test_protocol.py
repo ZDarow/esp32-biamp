@@ -7,13 +7,15 @@ from biamp import protocol as p
 SAMPLE_STATUS = [
     "V0=42% V1=38% bal=1.50",
     "Fc=500Hz hp=45Hz sub=ON",
-    "XO: LR4",
+    "XO: LR4 ON",
     "TLF=-2.00dB THF=1.00dB",
     "EQ: L=2.00 M=-1.50 H=0.00",
-    "INV: 1000",
+    "Mute: 1/0",
+    "SWP: 1",
+    "DUP: 0",
     "BT: ON | SPP: ON",
     "Src: 48 kHz",
-    "Test: 2 TVol=9%",
+    "Test: 2 TVol=5%",
     "CHF: 80/0 0/10000 0/0 0/0",
     "Delay: 0/0/3/0",
 ]
@@ -23,7 +25,7 @@ class CommandTests(unittest.TestCase):
     def test_volume(self):
         self.assertEqual(p.set_volume(40), "vol:40")
         self.assertEqual(p.set_zone_volume(1, 45), "v1:45")
-        self.assertEqual(p.set_mute(0, True), "mute:1")
+        self.assertEqual(p.set_mute(0, True), "mute:0:1")
 
     def test_range_rejected(self):
         with self.assertRaises(p.ProtocolError):
@@ -55,14 +57,14 @@ class CommandTests(unittest.TestCase):
         with self.assertRaises(p.ProtocolError):
             p.channel_filter(4, True, 100)
         with self.assertRaises(p.ProtocolError):
-            p.set_inversion(9)
+            p.set_mute(2, True)
 
     def test_longest_command_fits_firmware_buffer(self):
         for command in (
             p.channel_filter(0, True, 20000),
             p.channel_filter(3, False, 20000),
             p.set_test_freq(20000),
-            p.set_test_volume(100),
+            p.set_test_volume(6),
             p.channel_delay(3, 220),
         ):
             self.assertLessEqual(len(command.encode()), p.MAX_COMMAND_BYTES, command)
@@ -103,14 +105,19 @@ class StatusParserTests(unittest.TestCase):
         self.assertAlmostEqual(state.tilt_high_db, 1.0)
         self.assertAlmostEqual(state.eq_low_db, 2.0)
         self.assertAlmostEqual(state.eq_mid_db, -1.5)
-        self.assertEqual(state.inverted, (True, False, False, False))
+        self.assertTrue(state.muted_z0)
+        self.assertFalse(state.muted_z1)
+        self.assertTrue(state.lr_swap)
+        self.assertFalse(state.dup_out)
         self.assertTrue(state.bt_audio_on)
         self.assertTrue(state.spp_on)
         self.assertEqual(state.source_khz, "48")
         self.assertEqual(state.crossover_type, 2)
+        self.assertTrue(state.xo_on)
         self.assertEqual(state.delays, (0, 0, 3, 0))
         self.assertEqual(state.test_mode, 2)
-        self.assertEqual(state.test_volume, 9)
+        self.assertEqual(state.test_volume, 5)
+        self.assertEqual(state.unparsed_lines, ())
 
     def test_parses_channel_filters(self):
         state = p.parse_status(SAMPLE_STATUS)
@@ -133,7 +140,8 @@ class StatusParserTests(unittest.TestCase):
         assert state is not None
         data = state.to_dict()
         self.assertEqual(len(data["filters"]), p.CHANNEL_COUNT)
-        self.assertEqual(len(data["inverted"]), p.CHANNEL_COUNT)
+        self.assertEqual(len(data["delays"]), p.CHANNEL_COUNT)
+        self.assertNotIn("inverted", data)
 
 
 class ApplyTests(unittest.TestCase):
@@ -154,11 +162,30 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("chlp:1:10000", commands)
         self.assertEqual(len([c for c in commands if c.startswith("ch")]), 8)
 
-    def test_inversion_only_when_set(self):
-        state = p.DeviceState(inverted=(False, True, False, False))
+    def test_swap_and_dup_always_restored(self):
+        state = p.DeviceState(lr_swap=True, dup_out=True)
         commands = p.build_settings_commands(state)
-        self.assertIn("inv:1", commands)
-        self.assertNotIn("inv:0", commands)
+        self.assertIn("swap:1", commands)
+        self.assertIn("dup:1", commands)
+        self.assertNotIn("swap:0", commands)
+
+        cleared = p.build_settings_commands(p.DeviceState(lr_swap=False, dup_out=False))
+        self.assertIn("swap:0", cleared)
+        self.assertIn("dup:0", cleared)
+
+    def test_state_from_dict_validates(self):
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({"delays": [1, 2]})
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({"vol0": "много"})
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({"vol0": 900})
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({})
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({"test_volume": 50})
+        with self.assertRaises(p.ProtocolError):
+            p.state_from_dict({"filters": [{"high_pass_hz": 99999999}]})
 
     def test_all_commands_within_buffer(self):
         state = p.DeviceState(
