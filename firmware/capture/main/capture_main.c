@@ -76,12 +76,21 @@ static int64_t s_start_us;
 static uint32_t s_warmup;
 static uint32_t s_frames, s_dropped[CAP_ZONES], s_max_skew, s_errors;
 
+// Счётчик принятых от хоста байт и флаг «хост вообще виден». Оба нужны для
+// диагностики нативного USB: UART — единственный порт, который работает всегда,
+// поэтому по нему видно, доходят ли команды до платы, даже если нативный порт
+// на ПК молчит.
+static volatile uint32_t s_rx_bytes;
+
 static int usb_write(const void *data, size_t len) {
   const uint8_t *p = (const uint8_t *)data;
   size_t left = len;
   while (left > 0) {
     int w = usb_serial_jtag_write_bytes(p, left, pdMS_TO_TICKS(2000));
-    if (w <= 0) return -1;
+    if (w <= 0) {
+      ESP_LOGE(TAG, "usb_write: драйвер взял %d из %u байт", w, (unsigned)left);
+      return -1;
+    }
     p += (size_t)w;
     left -= (size_t)w;
   }
@@ -254,6 +263,9 @@ static bool start_capture(uint32_t seconds) {
     .flags = CAP_FLAG_MSB_JUSTIFIED | CAP_FLAG_SHORT_SLOTS,
     .reserved = 0,
   };
+  // Подтверждение приходит перед заголовком: после него поток уже чисто
+  // двоичный, и любая строка посередине сбила бы выравнивание кадров у хоста.
+  usb_puts("GO\n");
   if (usb_write(&h, sizeof(h)) != 0) return false;
 
   const int64_t now = esp_timer_get_time();
@@ -267,13 +279,15 @@ static bool start_capture(uint32_t seconds) {
 }
 
 static void handle_command(const char *line) {
+  ESP_LOGI(TAG, "команда из нативного USB: %s", line);
   if (strcmp(line, "PING") == 0) { usb_puts("PONG\n"); return; }
   if (strcmp(line, "INFO") == 0) {
     char msg[192];
     snprintf(msg, sizeof(msg),
-             "INFO chans=%d bits=%d slot=%d rate=%d frame=%d warmup=%d\n",
+             "INFO chans=%d bits=%d slot=%d rate=%d frame=%d warmup=%d rx=%" PRIu32
+             "\n",
              CAP_CHANNELS, CAP_BITS, CAP_SLOT_BITS, CAP_DECLARED_RATE,
-             CAP_FRAME_BYTES, CAP_WARMUP_FRAMES);
+             CAP_FRAME_BYTES, CAP_WARMUP_FRAMES, s_rx_bytes);
     usb_puts(msg);
     return;
   }
@@ -284,7 +298,6 @@ static void handle_command(const char *line) {
     if (sp) sec = (uint32_t)strtoul(sp + 1, NULL, 10);
     if (sec == 0 || sec > 3600) { usb_puts("ERR bad seconds\n"); return; }
     if (!start_capture(sec)) { usb_puts("ERR busy\n"); return; }
-    usb_puts("GO\n");
     return;
   }
   usb_puts("ERR unknown command\n");
@@ -299,6 +312,7 @@ static void console_task(void *arg) {
     CAP_WDT_RESET();
     uint8_t c;
     if (usb_serial_jtag_read_bytes(&c, 1, 0) == 1) {
+      s_rx_bytes++;
       if (c == '\n' || c == '\r') {
         line[at] = '\0';
         if (at > 0) handle_command(line);
@@ -345,6 +359,9 @@ void app_main(void) {
   usb_cfg.tx_buffer_size = 4096;
   usb_cfg.rx_buffer_size = 1024;
   ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_cfg));
+  ESP_LOGI(TAG, "нативный USB: драйвер=%d хост=%d",
+           usb_serial_jtag_is_driver_installed() ? 1 : 0,
+           usb_serial_jtag_is_connected() ? 1 : 0);
 
   ESP_LOGI(TAG, "выделяю кольца зон");
   for (int z = 0; z < CAP_ZONES; z++) {

@@ -5,6 +5,12 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 
+# Для S3 ESP-IDF по умолчанию выбирает вторым каналом консоли USB_SERIAL_JTAG.
+# Здесь это не нужно: каждый ESP_LOGI уходит и в нативный USB, то есть текст
+# логов попадает в тот же поток, что и отсчёты, а запись мимо кольцевого
+# буфера драйвера ещё и конфликтует с упаковщиком.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
 # DevKitC-1 с модулем N8: 8 МБ флеша. Снимок 30 с — это 10 МБ, но прошивка
 # вместе с двумя I²S занимает мало, запас нужен на размер образа ESP-IDF.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
