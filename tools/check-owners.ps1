@@ -1,12 +1,16 @@
 ﻿# Сверка матрицы владения путями.
 #
-# Матрица объявлена в трёх местах намеренно: хук работает офлайн, CODEOWNERS —
-# на сервере, BRANCHING.md объясняет причину. Обратная сторона — их можно
-# править по отдельности и получить расхождение: коммит начнёт проходить там,
-# где CODEOWNERS указывает другого владельца, и заметить это некому.
+# Матрица объявлена в трёх местах намеренно: хук работает офлайн,
+# CODEOWNERS — на сервере, BRANCHING.md объясняет причину. Обратная
+# сторона — их можно править по отдельности и получить расхождение:
+# коммит начнёт проходить там, где CODEOWNERS указывает другого
+# владельца, и заметить это некому.
 #
-# Скрипт сравнивает разбор путей из .githooks/pre-commit с CODEOWNERS и
-# падает, если правила не покрывают один и тот же набор путей.
+# Скрипт моделирует семантику обоих механизмов: в хуке (sh case)
+# выигрывает ПЕРВОЕ совпавшее правило, в CODEOWNERS — ПОСЛЕДНЕЕ.
+# Результат сравнивается с самым узким правилом, независимо от
+# порядка, — так ловится и расхождение владельцев, и перестановка
+# строк, и неправильная позиция catch-all.
 #
 # Использование: pwsh -File .\tools\check-owners.ps1
 
@@ -27,10 +31,11 @@ function Read-Lines([string]$path) {
     return ($text -replace "`r`n", "`n") -split "`n"
 }
 
-# ── Пути из хука ────────────────────────────────────────────────────────
+# ── Правила хука ─────────────────────────────────────────────────
+# Порядок сохраняется: в sh case первый подошедший шаблон выигрывает.
 $hook = Read-Lines $HookPath
 $inFn = $false
-$hookRules = @{}
+$hookOrdered = @()
 foreach ($line in $hook) {
     if ($line -match '^path_owner\(\)') { $inFn = $true; continue }
     if ($inFn -and $line -match '^\s*\}') { $inFn = $false; continue }
@@ -40,34 +45,33 @@ foreach ($line in $hook) {
     # включает его — иначе правило молча выпадает из разбора, и сверка
     # потом утверждает, что хук «не знает» путь, который знает.
     if ($line -match '^(.+?)\)\s+echo\s+"([a-z-]+)"') {
-        $patterns = $Matches[1] -split '\s*\|\s*'
-        $owner = $Matches[2]
-        foreach ($p in $patterns) {
-            $hookRules[$p.Trim()] = $owner
-        }
+        $patterns = @($Matches[1] -split '\s*\|\s*' | ForEach-Object { $_.Trim() })
+        $hookOrdered += [pscustomobject]@{ Patterns = $patterns; Owner = $Matches[2] }
     }
 }
 
-if ($hookRules.Count -eq 0) { throw 'В хуке не найдено ни одного правила path_owner()' }
+if ($hookOrdered.Count -eq 0) { throw 'В хуке не найдено ни одного правила path_owner()' }
 
-# ── Пути из CODEOWNERS ──────────────────────────────────────────────────
-$ownerRules = @{}
+# ── Правила CODEOWNERS ───────────────────────────────────────────
+# Порядок сохраняется: GitHub применяет последнее совпавшее правило.
+$coOrdered = @()
 foreach ($line in Read-Lines $OwnersPath) {
     $t = $line.Trim()
     if (-not $t -or $t.StartsWith('#')) { continue }
     if ($t -match '^(.+?)\s+@([\w\-\[\]]+)\s*$') {
-        $ownerRules[$Matches[1].Trim()] = $Matches[2]
+        $coOrdered += [pscustomobject]@{ Pattern = $Matches[1].Trim(); Owner = $Matches[2] }
     }
 }
 
-if ($ownerRules.Count -eq 0) { throw 'В CODEOWNERS не найдено ни одного правила' }
+if ($coOrdered.Count -eq 0) { throw 'В CODEOWNERS не найдено ни одного правила' }
 
 # Владельцы в двух файлах называются по-разному: в хуке это машинные
 # идентификаторы, в CODEOWNERS — GitHub-команды. Сопоставление по смыслу.
 $alias = @{
     'firmware'   = 'firmware'
     'android'    = 'android'
-    'pc-client'  = 'pc-client'
+    'web'        = 'web'
+    'verify'     = 'verify'
     'shared'     = 'integrator'
     'integrator' = 'integrator'
 }
@@ -77,36 +81,51 @@ function Resolve-Owner([string]$o) {
     return $o
 }
 
-# Правило '*' — это «владелец по умолчанию» для всего остального. В сравнении
-# оно бесполезно: покрывает любой путь и маскирует настоящее расхождение —
-# например, удаление README из хука прошло бы незамеченным. Поэтому catch-all
-# откладывается в сторону и сравниваются только конкретные правила.
-$hookRulesAll = $hookRules
-$ownerRulesAll = $ownerRules
-$hookRules = @{}
-$ownerRules = @{}
-foreach ($k in $hookRulesAll.Keys) { if ($k.TrimStart('/') -ne '*') { $hookRules[$k] = $hookRulesAll[$k] } }
-foreach ($k in $ownerRulesAll.Keys) { if ($k.TrimStart('/') -ne '*') { $ownerRules[$k] = $ownerRulesAll[$k] } }
-
-if ($hookRules.Count -eq 0) { throw "В хуке нет ни одного конкретного правила, кроме '*'" }
-if ($ownerRules.Count -eq 0) { throw "В CODEOWNERS нет ни одного конкретного правила, кроме '*'" }
-
-# Проверка наличия catch-all '*' в обоих наборах: без него новые файлы
-# остаются без владельца — хук их пропустит (→ * → unknown), а CODEOWNERS
-# назначит @integrator по умолчанию, и никто не заметит расхождения.
-if (-not ($hookRulesAll.Keys | Where-Object { $_.TrimStart('/') -eq '*' })) {
-    $problems += "В хуке отсутствует catch-all '*' (правило *) — новые файлы не будут проверяться на принадлежность направлению"
+# Хук — семантика шаблонов sh case: '*' совпадает с чем угодно,
+# 'dir/*' — с содержимым каталога на любой глубине (в шаблонах case
+# '*' проходит через '/'), иначе — точное совпадение.
+function Test-HookPattern([string]$pattern, [string]$path) {
+    if ($pattern -eq '*') { return $true }
+    if ($pattern.EndsWith('/*')) {
+        return $path.StartsWith($pattern.Substring(0, $pattern.Length - 1))
+    }
+    return $path -eq $pattern
 }
-if (-not ($ownerRulesAll.Keys | Where-Object { $_.TrimStart('/') -eq '*' })) {
-    $problems += "В CODEOWNERS отсутствует catch-all '*' — новые файлы получат владельца по умолчанию без явного назначения"
+
+# CODEOWNERS: ведущий / привязывает к корню, завершающий / покрывает
+# каталог и его содержимое, '*' — всё.
+function Test-COPattern([string]$pattern, [string]$path) {
+    $p = $pattern.TrimStart('/')
+    if ($p -eq '*') { return $true }
+    $p = $p.TrimEnd('/')
+    return ($path -eq $p) -or $path.StartsWith($p + '/')
+}
+
+# Владелец, которого назначит механизм: первое совпадение в хуке,
+# последнее — в CODEOWNERS.
+function Get-HookFirstMatch([string]$path, $rules) {
+    foreach ($r in $rules) {
+        foreach ($p in $r.Patterns) {
+            if (Test-HookPattern $p $path) { return $r.Owner }
+        }
+    }
+    return $null
+}
+
+function Get-COLastMatch([string]$path, $rules) {
+    $owner = $null
+    foreach ($r in $rules) {
+        if (Test-COPattern $r.Pattern $path) { $owner = $r.Owner }
+    }
+    return $owner
 }
 
 # Нормализует паттерн: убирает ведущий /, trailing /* и завершающий /.
 #
 # Завершающий слэш убирается тоже: иначе 'firmware/capture/' (CODEOWNERS) и
-# 'firmware/capture/*' (хук) нормализуются в разные строки, и сверка объявит
-# расхождением то, что на самом деле означает одно и то же. Покрытие
-# подкаталога проверяется отдельно, в Get-CoveringOwner.
+# 'firmware/capture/*' (хук) нормализуются в разные строки, и сверка
+# объявила бы расхождением то, что на самом деле означает одно и то же.
+# Покрытие подкаталога проверяется отдельно, в Get-CoveringOwner.
 function Normalize-Pattern([string]$p) {
     $p = $p.TrimStart('/')
     $p = $p -replace '\s*\*\s*$', ''
@@ -114,25 +133,21 @@ function Normalize-Pattern([string]$p) {
     return $p
 }
 
-# Возвращает владельца для пути: точное совпадение, затем покрытие по префиксу.
-# CODEOWNERS пишет с ведущим слэшем ('/firmware/'), хук — без ('firmware/*'),
-# поэтому оба нормализуются к общему виду для сравнения.
-function Get-CoveringOwner([string]$path, [hashtable]$rules) {
+# Самое узкое правило, покрывающее путь, — порядок не важен, важна
+# длина префикса. Это эталон того, кого матрица должна назначить.
+function Get-CoveringOwner([string]$path, $rules) {
     $needle = Normalize-Pattern $path
-    foreach ($rule in $rules.Keys) {
-        if ((Normalize-Pattern $rule) -eq $needle) { return $rules[$rule] }
-    }
     $best = $null
     $bestLen = -1
-    foreach ($rule in $rules.Keys) {
-        $r = Normalize-Pattern $rule
-        if (-not $r) { continue }
+    foreach ($r in $rules) {
+        $r2 = Normalize-Pattern $r.Pattern
+        if (-not $r2) { continue }
         # Каталог покрывает и сам себя, и всё под ним. Проверка границы
         # обязательна: без неё правило 'firmware/capture' накрыло бы и
         # 'firmware/captures-backup/', которого оно не касается.
-        if (($needle -eq $r -or $needle.StartsWith($r + '/')) -and $r.Length -gt $bestLen) {
-            $best = $rules[$rule]
-            $bestLen = $r.Length
+        if (($needle -eq $r2 -or $needle.StartsWith($r2 + '/')) -and $r2.Length -gt $bestLen) {
+            $best = $r.Owner
+            $bestLen = $r2.Length
         }
     }
     return $best
@@ -143,55 +158,141 @@ function Get-CoveringOwner([string]$path, [hashtable]$rules) {
 # Нормализация общая с Get-CoveringOwner, граница префикса проверяется
 # явно — иначе 'firmware/capture' считалось бы покрывающим
 # 'firmware/captures-backup/', и пропущенный путь прошёл бы сверку.
-function Test-Covered([string]$path, [hashtable]$rules) {
+function Test-Covered([string]$path, $rules) {
     $needle = (Normalize-Pattern $path) -replace '\*$', ''
-    foreach ($rule in $rules.Keys) {
-        $r = (Normalize-Pattern $rule) -replace '\*$', ''
-        if (-not $r -or -not $needle) { continue }
-        if ($needle -eq $r) { return $true }
-        if ($needle.StartsWith($r + '/') -or $r.StartsWith($needle + '/')) { return $true }
+    foreach ($r in $rules) {
+        $rr = (Normalize-Pattern $r.Pattern) -replace '\*$', ''
+        if (-not $rr -or -not $needle) { continue }
+        if ($needle -eq $rr) { return $true }
+        if ($needle.StartsWith($rr + '/') -or $rr.StartsWith($needle + '/')) { return $true }
     }
     return $false
 }
 
+# Плоские списки правил по одному шаблону — для эталонного поиска
+# самого узкого правила и для проверок покрытия.
+$hookFlat = @()
+foreach ($r in $hookOrdered) {
+    foreach ($p in $r.Patterns) {
+        $hookFlat += [pscustomobject]@{ Pattern = $p; Owner = $r.Owner }
+    }
+}
+$coFlat = @($coOrdered)
+
+# Конкретные правила, без catch-all: сравнение владельцев идёт по ним,
+# иначе '*' покрывает любой путь и маскирует настоящее расхождение —
+# например, удаление README из хука прошло бы незамеченным.
+$hookConcrete = @($hookFlat | Where-Object { $_.Pattern.TrimStart('/') -ne '*' })
+$coConcrete = @($coFlat | Where-Object { $_.Pattern.TrimStart('/') -ne '*' })
+
+if ($hookConcrete.Count -eq 0) { throw 'В хуке нет ни одного конкретного правила, кроме "*"' }
+if ($coConcrete.Count -eq 0) { throw 'В CODEOWNERS нет ни одного конкретного правила, кроме "*"' }
+
 $problems = @()
 
+# Catch-all обязан быть в обоих наборах: без него новые файлы остаются
+# без владельца — хук их пропустит (→ * → unknown), а CODEOWNERS
+# назначит @integrator по умолчанию, и никто не заметит расхождения.
+$hookHasAll = $hookFlat | Where-Object { $_.Pattern.TrimStart('/') -eq '*' }
+if (-not $hookHasAll) {
+    $problems += 'В хуке отсутствует catch-all "*" — новые файлы не будут проверяться на принадлежность направлению'
+}
+$coHasAll = $coFlat | Where-Object { $_.Pattern.TrimStart('/') -eq '*' }
+if (-not $coHasAll) {
+    $problems += 'В CODEOWNERS отсутствует catch-all "*" — новые файлы получат владельца по умолчанию без явного назначения'
+}
+
+# Позиция catch-all — часть матрицы. В CODEOWNERS он стоит ПЕРВЫМ:
+# GitHub применяет последнее совпадение, и "* @integrator" в конце
+# файла перекрывает все правила выше — владельцы направлений теряются.
+if ($coOrdered[0].Pattern.TrimStart('/') -ne '*') {
+    $problems += 'В CODEOWNERS catch-all "*" должен быть первым правилом: GitHub применяет последнее совпадение, и "* @integrator" в конце перекрывает все правила выше'
+}
+
+# В хуке catch-all стоит ПОСЛЕДНИМ: в case первый подошедший шаблон
+# выигрывает, и "*" выше конкретных правил оставил бы их недостижимыми.
+$hookLast = $hookOrdered[$hookOrdered.Count - 1]
+if ($hookLast.Patterns.Count -ne 1 -or $hookLast.Patterns[0] -ne '*') {
+    $problems += 'В хуке catch-all "*" должен быть последним правилом path_owner(): в case первый подошедший шаблон выигрывает'
+}
+
+# Правила CODEOWNERS (кроме "*") обязаны начинаться с /: без якоря
+# шаблон совпадает с путём в любом каталоге, и владелец назначается
+# не тому файлу.
+foreach ($r in $coOrdered) {
+    if ($r.Pattern -ne '*' -and -not $r.Pattern.StartsWith('/')) {
+        $problems += "Правило CODEOWNERS '$($r.Pattern)' не начинается с / — шаблон совпадёт с файлом в любом каталоге"
+    }
+}
+
 # Хук обязан знать каждый путь, который CODEOWNERS кому-то приписывает.
-foreach ($path in $ownerRules.Keys) {
-    if (-not (Test-Covered $path $hookRules)) {
-        $problems += "CODEOWNERS описывает '$path', но хук о нём не знает: правка из чужой ветки пройдёт молча"
+foreach ($r in $coConcrete) {
+    if (-not (Test-Covered $r.Pattern $hookConcrete)) {
+        $problems += "CODEOWNERS описывает '$($r.Pattern)', но хук о нём не знает: правка из чужой ветки пройдёт молча"
     }
 }
 
 # Обратная проверка: путь из хука, которого нет в CODEOWNERS, на сервере
 # останется без владельца.
-foreach ($path in $hookRules.Keys) {
-    if (-not (Test-Covered $path $ownerRules)) {
-        $problems += "хук описывает '$path' (владелец $(Resolve-Owner $hookRules[$path])), но в CODEOWNERS его нет"
+foreach ($r in $hookConcrete) {
+    if (-not (Test-Covered $r.Pattern $coConcrete)) {
+        $problems += "хук описывает '$($r.Pattern)' (владелец $(Resolve-Owner $r.Owner)), но в CODEOWNERS его нет"
     }
 }
 
-# Сравнение значений владельцев: для каждого пути проверяем, что хук и
-# CODEOWNERS приписывают его одному и тому же владельцу. Покрытие путей
-# (Test-Covered выше) гарантирует, что путь известен обеим сторонам, но не
-# гарантирует, что владелец совпадает — вот это сравнение и ловит расхождения
-# вроде «хук: firmware, CODEOWNERS: @integrator».
-$allPaths = @{}
-foreach ($p in $hookRulesAll.Keys) {
-    if ($p.TrimStart('/') -ne '*') { $allPaths[(Normalize-Pattern $p)] = $null }
+# Пути-пробы: каждое правило порождает себя и файл внутри себя, плюс
+# граничные случаи — пути, которые легко перекрыть широким правилом
+# при перестановке строк.
+$probes = @{}
+foreach ($r in $hookConcrete) {
+    $p = $r.Pattern.TrimStart('/')
+    if ($p.EndsWith('/*')) {
+        $dir = $p.Substring(0, $p.Length - 2)
+        # Только файл внутри каталога: git никогда не ставит в индекс
+        # «голый» каталог, поэтому проба bare-dir даёт ложное срабатывание
+        # (хук 'docs/*' не покрывает bare 'docs', а CODEOWNERS '/docs/' — покрывает).
+        $probes[$dir + '/probe.c'] = $true
+    } else {
+        $probes[$p] = $true
+    }
 }
-foreach ($p in $ownerRulesAll.Keys) {
-    if ($p.TrimStart('/') -ne '*') { $allPaths[(Normalize-Pattern $p)] = $null }
+foreach ($r in $coConcrete) {
+    $p = $r.Pattern.TrimStart('/')
+    if ($p.EndsWith('/')) {
+        $dir = $p.TrimEnd('/')
+        $probes[$dir + '/probe.c'] = $true
+    } else {
+        $probes[$p] = $true
+    }
 }
-foreach ($path in $allPaths.Keys) {
-    $hookOwner = Get-CoveringOwner $path $hookRules
-    $coOwner = Get-CoveringOwner $path $ownerRules
-    if ($hookOwner -and $coOwner) {
-        $rh = Resolve-Owner $hookOwner
-        $rc = Resolve-Owner $coOwner
-        if ($rh -ne $rc) {
-            $problems += "Владелец расхождён: '$path' — хук приписывает '$hookOwner' (→ $rh), CODEOWNERS приписывает '@$coOwner' (→ $rc)"
-        }
+$probes['firmware/captures-backup/probe.c'] = $true
+$probes['firmware/tools/other.py'] = $true
+$probes['firmware/protocol/status-contract.md'] = $true
+$probes['android-app/docs/DOCUMENTATION.md'] = $true
+$probes['pc-client/biamp/protocol.py'] = $true
+$probes['README.md'] = $true
+$probes['docs/BRANCHING.md'] = $true
+$probes['tools/check-owners.ps1'] = $true
+$probes['.github/CODEOWNERS'] = $true
+$probes['SECURITY.md'] = $true
+
+# Моделирование: для каждой пробы сравниваем, кого назначит хук
+# (первое совпадение), кого назначит CODEOWNERS (последнее) и кого
+# должна назначить матрица (самое узкое правило). Расхождение —
+# баг порядка или владельца.
+foreach ($probe in ($probes.Keys | Sort-Object)) {
+    $hookOwner = Get-HookFirstMatch $probe $hookOrdered
+    $coOwner = Get-COLastMatch $probe $coOrdered
+    $intendedHook = Get-CoveringOwner $probe $hookConcrete
+    $intendedCo = Get-CoveringOwner $probe $coConcrete
+    if ($hookOwner -and $intendedHook -and (Resolve-Owner $hookOwner) -ne (Resolve-Owner $intendedHook)) {
+        $problems += "Порядок хука ломает '$probe': первое совпадение даёт '$hookOwner', а самое узкое правило — '$intendedHook'"
+    }
+    if ($coOwner -and $intendedCo -and (Resolve-Owner $coOwner) -ne (Resolve-Owner $intendedCo)) {
+        $problems += "Порядок CODEOWNERS ломает '$probe': последнее совпадение даёт '@$coOwner', а самое узкое правило — '@$intendedCo'"
+    }
+    if ($hookOwner -and $coOwner -and (Resolve-Owner $hookOwner) -ne (Resolve-Owner $coOwner)) {
+        $problems += "Владелец расхождён: '$probe' — хук приписывает '$hookOwner', CODEOWNERS приписывает '@$coOwner'"
     }
 }
 
@@ -203,5 +304,5 @@ if ($problems.Count -gt 0) {
     exit 1
 }
 
-Write-Host "Матрица владения согласована: $($hookRules.Count) конкретных правил в хуке, $($ownerRules.Count) в CODEOWNERS (плюс catch-all '*' в обоих)." -ForegroundColor Green
+Write-Host "Матрица владения согласована: $($hookConcrete.Count) конкретных правил в хуке, $($coConcrete.Count) в CODEOWNERS (плюс catch-all '*' первым в CODEOWNERS и последним в хуке)." -ForegroundColor Green
 exit 0

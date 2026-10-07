@@ -50,12 +50,13 @@ path_owner() {
 	firmware/capture/* | firmware/capture) echo "verify" ;;
 	firmware/tools/capture-analyze.py) echo "verify" ;;
 	.github/workflows/ci-verify.yml) echo "verify" ;;
+	firmware/protocol/status-contract.md) echo "firmware" ;;
 	firmware/* | SECURITY.md | .github/workflows/ci-firmware.yml) echo "firmware" ;;
 	android-app/* | .github/workflows/ci-android.yml) echo "android" ;;
 	pc-client/* | .github/workflows/ci-pc-client.yml) echo "web" ;;
 	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE | NOTICE) echo "shared" ;;
 	.gitignore | .gitattributes | .editorconfig) echo "shared" ;;
-	docs/* | .githooks/* | tools/*) echo "shared" ;;
+	docs/* | .githooks/* | tools/* | .github/CODEOWNERS) echo "shared" ;;
 	.github/workflows/ci-hygiene.yml | .github/workflows/release.yml) echo "shared" ;;
 	*) echo "unknown" ;;
 	esac
