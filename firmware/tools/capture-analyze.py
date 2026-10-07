@@ -135,6 +135,17 @@ SCENARIOS: dict[str, dict] = {
         "wait": 2.0, "rec": 6.0, "tone": 1000.0,
         "note": "максимально разрешённый уровень теста: ищем клиппинг",
     },
+    "crosstalk": {
+        "cmds": ["dup:0", "tvol:4", "tf:1000", "test:1"],
+        "wait": 2.0, "rec": 6.0, "tone": 1000.0,
+        "note": "тон только на Z1 НФ (test:1): измеряем утечку на остальные каналы",
+    },
+    "level-sweep": {
+        "cmds": ["dup:0", "tf:1000", "test:all"],
+        "wait": 2.0, "rec": 6.0, "tone": 1000.0,
+        "note": "автоматический перебор tvol:1..6: пик, RMS и клиппинг на каждом уровне",
+        "levels": [1, 2, 3, 4, 5, 6],
+    },
 }
 
 
@@ -586,6 +597,42 @@ def bit_compare(data: np.ndarray) -> dict:
     return {"pairs": out}
 
 
+def crosstalk_analysis(data: np.ndarray, rate: float, ref_channel: int = 0) -> dict:
+    """Измеряет утечку сигнала с опорного канала на остальные.
+    
+    В режиме test:1 сигнал подаётся только на Z1 НФ (канал 0).
+    Утелка на другие каналы — это перекрестные помехи между зонами/ветками.
+    """
+    ref = data[:, ref_channel]
+    ref_rms = float(np.sqrt(np.mean(ref.astype(np.float64) ** 2)))
+    ref_peak = float(np.max(np.abs(ref.astype(np.float64))))
+    out = {
+        "ref_channel": CH_NAMES[ref_channel],
+        "ref_rms_dbfs": db(ref_rms),
+        "ref_peak_dbfs": db(ref_peak),
+        "channels": [],
+    }
+    for i in range(data.shape[1]):
+        if i == ref_channel:
+            continue
+        ch = data[:, i]
+        ch_rms = float(np.sqrt(np.mean(ch.astype(np.float64) ** 2)))
+        ch_peak = float(np.max(np.abs(ch.astype(np.float64))))
+        if ref_rms > 1e-9 and ch_rms > 1e-9:
+            isolation_db = db(ref_rms) - db(ch_rms)
+        elif ref_rms > 1e-9:
+            isolation_db = 120.0
+        else:
+            isolation_db = 0.0
+        out["channels"].append({
+            "channel": CH_NAMES[i],
+            "rms_dbfs": db(ch_rms) if ch_rms > 1e-9 else -240.0,
+            "peak_dbfs": db(ch_peak) if ch_peak > 1e-9 else -240.0,
+            "isolation_db": isolation_db,
+        })
+    return out
+
+
 # ── счётчики Master ─────────────────────────────────────────────────────
 # Строки `stats`, которые обязаны быть нулевыми. Порядок и начертание заданы
 # прошивкой; разбор устойчив к лишним пробелам и к посторонним строкам.
@@ -635,6 +682,45 @@ def capture_retry(sniffer, master, meta: dict, seconds: float, scenario: str,
         print(f"Попытка {attempts}: щелчков по каналам {clicks} — брак пути "
               f"измерения, перезаписываем")
     return data, hdr, trailer, body, attempts
+
+
+def run_level_sweep(sniffer, master, meta: dict, levels: list[int],
+                    seconds: float, outdir: Path) -> list[dict]:
+    """Запускает захват на каждом уровне tvol и возвращает метрики."""
+    import time
+
+    results = []
+    base_cmds = [c for c in meta["cmds"] if not c.startswith("tvol:")]
+    for lvl in levels:
+        cmds = base_cmds + [f"tvol:{lvl}"]
+        print(f"\n=== Уровень {lvl} ===")
+        for cmd in cmds:
+            reply = master_command(master, cmd, timeout=1.0)
+            if reply:
+                print(f"Master {cmd} -> {reply.splitlines()[-1]}")
+            else:
+                print(f"Master {cmd} -> без ответа")
+            time.sleep(0.15)
+        time.sleep(meta["wait"])
+        data, hdr, trailer, body, attempts = capture_retry(
+            sniffer, master, meta, seconds, "level-sweep")
+        rate = float(hdr["declared_rate"])
+        peaks = [float(np.max(np.abs(data[:, i]))) for i in range(data.shape[1])]
+        rms = [float(np.sqrt(np.mean(data[:, i].astype(np.float64) ** 2))) for i in range(data.shape[1])]
+        clicks = [click_scan(data[:, i], rate)["count"] for i in range(data.shape[1])]
+        clipped = [p >= FULL_SCALE * 0.99 for p in peaks]
+        results.append({
+            "level": lvl,
+            "peaks_dbfs": [db(p / FULL_SCALE) for p in peaks],
+            "rms_dbfs": [db(r / FULL_SCALE) for r in rms],
+            "clicks": clicks,
+            "clipped": clipped,
+            "frames": len(data),
+        })
+        lvl_dir = outdir / f"tvol{lvl}"
+        lvl_dir.mkdir(parents=True, exist_ok=True)
+        write_wav(lvl_dir / "capture.wav", data, rate)
+    return results
 
 
 def delay_residual(base_lag: int, z2lf_lag: int, z2hf_lag: int, d_set: int) -> dict:
@@ -708,6 +794,9 @@ def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | Non
 
     if scenario == "dup":
         report["dup"] = bit_compare(data)
+
+    if scenario == "crosstalk":
+        report["crosstalk"] = crosstalk_analysis(data, rate)
 
     if scenario == "delay":
         by_pair = {d["pair"]: d for d in report["delays"]}
@@ -863,6 +952,31 @@ def render_markdown(rep: dict) -> str:
         add(f"| {name} | {fmt(b.get('passband_dbfs'))} | {fmt(b.get('crossover_hz'), 1)} | "
             f"{fmt(b.get('ripple_db'))} | {fmt(b.get('stopband_dbfs'))} | "
             f"×{fmt(s.get('freq_ratio_median'), 4)} |")
+    if "crosstalk" in rep:
+        ct = rep["crosstalk"]
+        add("")
+        add("## Перекрестные помехи (crosstalk)")
+        add("")
+        add(f"Опорный канал: **{ct['ref_channel']}** (пик {fmt(ct['ref_peak_dbfs'])} дБФС, "
+            f"RMS {fmt(ct['ref_rms_dbfs'])} дБФС)")
+        add("")
+        add("| Канал | RMS, дБФС | Пик, дБФС | Изоляция, дБ |")
+        add("|---|---|---|---|")
+        for ch in ct["channels"]:
+            add(f"| {ch['channel']} | {fmt(ch['rms_dbfs'])} | {fmt(ch['peak_dbfs'])} | "
+                f"{fmt(ch['isolation_db'])} |")
+    if "level_sweep" in rep:
+        ls = rep["level_sweep"]
+        add("")
+        add("## Развертка по уровню (level-sweep)")
+        add("")
+        add("| tvol | Канал | Пик, дБФС | RMS, дБФС | Щелчков | Клип |")
+        add("|---|---|---|---|---|---|")
+        for step in ls:
+            for i, name in enumerate(CH_NAMES):
+                add(f"| {step['level']} | {name} | {fmt(step['peaks_dbfs'][i])} | "
+                    f"{fmt(step['rms_dbfs'][i])} | {step['clicks'][i]} | "
+                    f"{'⚠️ да' if step['clipped'][i] else 'нет'} |")
     add("")
     return "\n".join(lines)
 
@@ -898,7 +1012,11 @@ def load_raw(path: Path) -> tuple[np.ndarray, dict, dict]:
 def cmd_list() -> None:
     print("Сценарии (--scenario):")
     for name, s in SCENARIOS.items():
-        print(f"  {name:11s} запись {s['rec']:g} с · {s['note']}")
+        if name == "level-sweep":
+            levels = s.get("levels", [1, 2, 3, 4, 5, 6])
+            print(f"  {name:11s} запись {s['rec']:g} с × {len(levels)} уровней · {s['note']}")
+        else:
+            print(f"  {name:11s} запись {s['rec']:g} с · {s['note']}")
     print("\n  без --scenario берётся dup — он же калибровка выравнивания зон")
 
 
@@ -953,37 +1071,72 @@ def main(argv: list[str] | None = None) -> int:
             print("Сниффер:", sniffer_command(sniffer, "INFO").decode(errors="replace").strip())
             if args.master:
                 master = open_port(args.master, 115200, timeout=0.5)
-                # DTR/RTS на ESP32 — это сброс. Отпустить их нужно до любой
-                # команды, иначе Master перезагрузится уже во время захвата.
                 master.dtr = False
                 master.rts = False
                 boot = wait_master_ready(master)
                 counters = [ln.strip() for ln in boot.splitlines()
                             if ln.strip().startswith(("RingDrops", "Underrun", "Clips"))]
                 print("Master готов:", "; ".join(counters) or "ответ без счётчиков")
-            data, hdr, trailer, body, capture_attempts = capture_retry(
-                sniffer, master, meta, seconds, scenario)
-            if capture_attempts > 1:
-                print(f"Захват принят с попытки {capture_attempts}")
-            if master is not None:
-                # Счётчики снимаются здесь же: следующее открытие порта дёрнет
-                # DTR/RTS, Master перезагрузится, и все счётчики станут нулями —
-                # ровно теми, которых ждёт проверка. Так дефект тракта не будет
-                # выглядеть как «всё чисто».
-                master_stats = parse_master_stats(master_command(master, "stats", timeout=2.0))
+
+            if scenario == "level-sweep":
+                levels = meta.get("levels", [1, 2, 3, 4, 5, 6])
+                level_results = run_level_sweep(sniffer, master, meta, levels, seconds, outdir)
+                master_stats = parse_master_stats(master_command(master, "stats", timeout=2.0)) if master else {}
+                data, hdr, trailer, body, capture_attempts = None, None, None, b"", 1
+            else:
+                data, hdr, trailer, body, capture_attempts = capture_retry(
+                    sniffer, master, meta, seconds, scenario)
+                if capture_attempts > 1:
+                    print(f"Захват принят с попытки {capture_attempts}")
+                if master is not None:
+                    master_stats = parse_master_stats(master_command(master, "stats", timeout=2.0))
         finally:
             if master is not None:
                 master.dtr = False
                 master.rts = False
                 master.close()
             sniffer.close()
-        rate = float(hdr["declared_rate"])
-        write_wav(outdir / "capture.wav", data, rate)
-        if args.keep_raw:
-            (outdir / "raw.bin").write_bytes(body)
-            print(f"Сырой поток: {outdir / 'raw.bin'}")
 
-    report = analyze(data, rate, hdr, trailer, scenario or args.scenario, master_stats)
+        if scenario == "level-sweep":
+            rate = float(44100)
+            report = {
+                "scenario": "level-sweep",
+                "scenario_note": meta.get("note"),
+                "frames": sum(r["frames"] for r in level_results),
+                "seconds": sum(r["frames"] for r in level_results) / rate,
+                "rate": rate,
+                "master_counters": master_stats or {},
+                "header": hdr,
+                "trailer": trailer,
+                "channels": {},
+                "delays": [],
+                "clicks": {},
+                "tones": {},
+                "sweep": {},
+                "level_sweep": level_results,
+            }
+            for i, name in enumerate(CH_NAMES):
+                all_peaks_dbfs = [r["peaks_dbfs"][i] for r in level_results]
+                all_rms_dbfs = [r["rms_dbfs"][i] for r in level_results]
+                all_clicks = [r["clicks"][i] for r in level_results]
+                max_peak_dbfs = max(all_peaks_dbfs)
+                max_peak = FULL_SCALE * 10 ** (max_peak_dbfs / 20.0)
+                report["channels"][name] = {
+                    "peak": max_peak,
+                    "peak_dbfs": max_peak_dbfs,
+                    "rms_dbfs": max(all_rms_dbfs),
+                    "noise_dbfs": 0.0,
+                    "dc": 0.0,
+                    "clicks": {"count": sum(all_clicks), "positions_ms": [], "max_jump": 0},
+                    "crest_db": 0.0,
+                }
+        else:
+            rate = float(hdr["declared_rate"])
+            write_wav(outdir / "capture.wav", data, rate)
+            if args.keep_raw:
+                (outdir / "raw.bin").write_bytes(body)
+                print(f"Сырой поток: {outdir / 'raw.bin'}")
+            report = analyze(data, rate, hdr, trailer, scenario or args.scenario, master_stats)
     report["capture_attempts"] = capture_attempts
     (outdir / "report.md").write_text(render_markdown(report), encoding="utf-8")
     (outdir / "report.json").write_text(

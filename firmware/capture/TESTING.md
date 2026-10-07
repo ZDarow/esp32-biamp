@@ -79,6 +79,8 @@ py -3.14 -m pip install pyserial numpy
 | `sweep` | `dup:0 tvol:4 test:sweep` | АЧХ четырёх выходов |
 | `delay` | `dup:0 delay2:64 tvol:4 tf:100 test:all` | Задержка DSP 64 отсчёта |
 | `clip` | `dup:0 tvol:6 tf:1000 test:all` | Клиппинг при максимальном уровне |
+| `crosstalk` | `dup:0 tvol:4 tf:1000 test:1` | Утечка с Z1 НФ на остальные каналы |
+| `level-sweep` | `dup:0 tf:1000 test:all` (автоперебор tvol:1..6) | Пик/RMS/клип на каждом уровне |
 
 ### Запуск
 
