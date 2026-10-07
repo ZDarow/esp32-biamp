@@ -267,7 +267,7 @@ foreach ($r in $coConcrete) {
 }
 $probes['firmware/captures-backup/probe.c'] = $true
 $probes['firmware/tools/other.py'] = $true
-$probes['firmware/protocol/status-contract.md'] = $true
+$probes['protocol/status-contract.md'] = $true
 $probes['android-app/docs/DOCUMENTATION.md'] = $true
 $probes['pc-client/biamp/protocol.py'] = $true
 $probes['README.md'] = $true

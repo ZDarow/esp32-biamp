@@ -26,10 +26,6 @@
 /firmware/ESP32_BiAmp/            @firmware
 /firmware/tools/                  @firmware
 /firmware/.vscode/                @firmware
-# Контракт протокола — источник истины формата команд. Правится
-# только согласованно со всеми тремя реализациями, поэтому явно
-# закреплён за прошивкой, а не за общими файлами.
-/firmware/protocol/status-contract.md @firmware
 /SECURITY.md                      @firmware
 /.github/workflows/ci-firmware.yml @firmware
 
@@ -67,6 +63,7 @@
 /docs/                            @integrator
 /.githooks/                       @integrator
 /.github/CODEOWNERS               @integrator
+/protocol/                        @integrator
 /tools/                           @integrator
 /.github/workflows/ci-hygiene.yml @integrator
 /.github/workflows/release.yml    @integrator

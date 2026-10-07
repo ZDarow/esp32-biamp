@@ -53,7 +53,7 @@
 - [ ] Диапазоны в UI (если затронуты) совпадают с
       `safeCmdVal()` в скетче.
 - [ ] Изменился протокол — обновлены
-      `firmware/protocol/status-contract.md`,
+      `protocol/status-contract.md`,
       `android-app/.../bt/Protocol.kt`,
       `pc-client/biamp/protocol.py` и документация.
 - [ ] Host-тесты математики: `cd firmware/tests &&
@@ -68,7 +68,7 @@
       (нужен телефон; соединение подменяется
       `FakeSppClient`).
 - [ ] Контрактный тест читает блок `status` из
-      `firmware/protocol/status-contract.md` и падает,
+      `protocol/status-contract.md` и падает,
       если в блоке появится незнакомая строка.
 - [ ] Лимиты ползунков не выходят за `safeCmdVal()`
       прошивки (`MAX_DELAY_SAMPLES = 220`,

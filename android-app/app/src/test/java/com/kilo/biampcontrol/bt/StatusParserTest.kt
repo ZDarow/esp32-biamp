@@ -7,7 +7,7 @@
  * строка `XO:` до v30 не содержала хвоста ` ON`/` OFF`, а строк Mute/SWP/DUP
  * в ней не было вовсе.
  *
- * Дословный блок из firmware/protocol/status-contract.md проверяет отдельный
+ * Дословный блок из protocol/status-contract.md проверяет отдельный
  * контрактный тест StatusContractTest.
  */
 

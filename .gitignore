@@ -30,6 +30,7 @@ firmware/capture/sdkconfig.old
 # ── Python ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # ── Локальная конфигурация ─────────────────────────────────────────────
 # Содержит локальные пути, не должна попадать в репозиторий
@@ -43,11 +44,15 @@ gradle.properties.local
 # ── Идентификаторы и редактор ──────────────────────────────────────────
 .idea/
 *.iml
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/extensions.json
-!.vscode/launch.json
+# Локальная конфигурация редактора не коммитится. Раскомментируйте
+# строки ниже, когда появятся shared настройки (settings.json, tasks.json
+# и т.п.) — тогда они будут отслеживаться намеренно.
+# .vscode/*
+# !.vscode/settings.json
+# !.vscode/tasks.json
+# !.vscode/extensions.json
+# !.vscode/launch.json
+.vscode/
 *.swp
 *~
 .DS_Store

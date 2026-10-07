@@ -1,4 +1,4 @@
-"""Контрактный тест протокола (раздел 5 `firmware/protocol/status-contract.md`).
+"""Контрактный тест протокола (раздел 5 `protocol/status-contract.md`).
 
 Блок `status` берётся ДОСЛОВНО из файла контракта: тест обязан падать, если
 в блок добавлена строка, которую парсер не знает. Именно это свойство
@@ -13,14 +13,13 @@ from pathlib import Path
 
 from biamp import protocol as p
 
-CONTRACT = Path(__file__).resolve().parents[2] / "firmware" / "protocol" / "status-contract.md"
+CONTRACT = Path(__file__).resolve().parents[2] / "protocol" / "status-contract.md"
 SECTION_2 = "## 2."
 BLOCK_RE = re.compile(r"##\s*2\.[^\n]*\n+```\n(.*?)```", re.DOTALL)
 
-# Файл контракта принадлежит направлению firmware (docs/BRANCHING.md), поэтому
-# в ветке pc-client-dev его нет: ветки живут раздельно до слияния в main.
-# Проверять блок status нечем — класс пропускается, а не падает на чужом файле.
-# В main и в firmware-dev контракт лежит рядом, и проверка работает как обычно.
+# Контракт принадлежит направлению integrator (общий файл в protocol/),
+# поэтому он есть на всех ветках — в т.ч. на pc-client-dev. Проверка
+# блока status работает как обычно.
 HAS_CONTRACT = CONTRACT.is_file()
 SKIP_REASON = f"нет файла контракта {CONTRACT} — он в ветке направления firmware"
 

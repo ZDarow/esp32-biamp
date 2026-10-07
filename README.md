@@ -77,7 +77,7 @@ A2DP (44.1/48 кГц) → ресемплинг 48→44.1 → кольцевой 
 - **Самотест кольца** при загрузке: `Ring selftest: PASS frames=…
   bad=0 drops=0`. `bad > 0` — порча данных, публикация запрещена.
 - **Протокол** — текстовые строки, терминатор `\n`, максимум 63
-  символа. Источник истины — `firmware/protocol/status-contract.md`
+  символа. Источник истины — `protocol/status-contract.md`
   (контракт v35.1), один на все три реализации.
 
 ### Компоненты
@@ -117,11 +117,11 @@ esp32-biamp/
 │   ├── ESP32_BiAmp/
 │   │   └── ESP32_BiAmp.ino      # Скетч, ~1500 строк
 │   ├── capture/                 # Сниффер ESP32-S3 (направление verify)
-│   ├── protocol/
-│   │   └── status-contract.md   # Контракт протокола v35.1 — источник истины
 │   ├── tests/                   # Host-тесты математики DSP
 │   ├── tools/                   # Скрипты сборки и прошивки (PowerShell)
 │   └── DOCUMENTATION.md         # Полная техническая документация
+├── protocol/                    # Контракт протокола v35.1 — источник истины
+│   └── status-contract.md       # Общий для всех реализаций
 ├── android-app/                 # Android-приложение
 │   ├── app/src/main/java/       # Kotlin, Jetpack Compose
 │   ├── app/src/test/            # Юнит-тесты
@@ -316,7 +316,7 @@ cd pc-client
 символа. Большинство команд не имеет ответа; параметры проверяются на
 устройстве, значение вне диапазона игнорируется молча.
 
-**Источник истины — `firmware/protocol/status-contract.md`.** Три
+**Источник истины — `protocol/status-contract.md`.** Три
 реализации (прошивка, Android, PC-клиент) обязаны совпадать с ним.
 
 | Команда | Диапазон | Действие |
@@ -369,7 +369,7 @@ Delay: 0/0/0/0
 ```
 
 Полное описание — [раздел 4.4 документации приложения](android-app/docs/DOCUMENTATION.md)
-и [контракт v35.1](firmware/protocol/status-contract.md).
+и [контракт v35.1](protocol/status-contract.md).
 
 ### Диагностика треска
 
@@ -449,7 +449,7 @@ git checkout main && git merge --ff-only firmware-dev
 | Документ | Содержание |
 |---|---|
 | [firmware/DOCUMENTATION.md](firmware/DOCUMENTATION.md) | Архитектура тракта, все команды, бюджет времени, история версий, диагностика |
-| [firmware/protocol/status-contract.md](firmware/protocol/status-contract.md) | Контракт протокола v35.1 — источник истины для всех реализаций |
+| [protocol/status-contract.md](protocol/status-contract.md) | Контракт протокола v35.1 — источник истины для всех реализаций |
 | [android-app/docs/DOCUMENTATION.md](android-app/docs/DOCUMENTATION.md) | Классы, протокол, сценарии, troubleshooting |
 | [pc-client/README.md](pc-client/README.md) | CLI, веб-панель, защита панели, профили |
 | [docs/BRANCHING.md](docs/BRANCHING.md) | Стратегия ветвления, владение путями, синхронизация направлений |

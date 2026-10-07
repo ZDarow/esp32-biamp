@@ -24,7 +24,7 @@
 
 | Направление | Ветка | Свои пути |
 |---|---|---|
-| Прошивка ESP32 | `firmware-dev` | `firmware/**`, кроме `capture/` и `tools/capture-analyze.py`; `firmware/protocol/status-contract.md` (контракт протокола); `SECURITY.md`; `.github/workflows/ci-firmware.yml` |
+| Прошивка ESP32 | `firmware-dev` | `firmware/**`, кроме `capture/` и `tools/capture-analyze.py`; `SECURITY.md`; `.github/workflows/ci-firmware.yml` |
 | Приложение Android | `android-dev` | `android-app/**`, `.github/workflows/ci-android.yml` |
 | Веб-панель и клиент для ПК | `pc-client-dev` | `pc-client/**`, `.github/workflows/ci-pc-client.yml` |
 | Проверки и измерения | `verify-dev` | `firmware/capture/**`, `firmware/tools/capture-analyze.py`, `.github/workflows/ci-verify.yml` |
@@ -35,10 +35,11 @@
 цифрового выхода Master, и её правки идут вместе с анализатором, а не вместе
 с аудиотрактом.
 
-**Владение путями.** Контракт протокола `firmware/protocol/status-contract.md` —
-источник истины формата команд — принадлежит прошивке и правится только
-согласованно со всеми тремя реализациями; он явно закреплён за `firmware` во
-всех трёх копиях матрицы (хук, CODEOWNERS, этот файл).
+**Владение путями.** Контракт протокола `protocol/status-contract.md` —
+источник истины формата команд — принадлежит направлению `integrator`
+(общий файл) и правится только согласованно со всеми тремя реализациями;
+он явно закреплён за `integrator` во всех трёх копиях матрицы (хук,
+CODEOWNERS, этот файл).
 
 **Проверки не пишут протокол.** Они читают его, чтобы разбирать захваты, но
 не могут менять ни `firmware/ESP32_BiAmp/`, ни лимиты `safeCmdVal()`. Это
@@ -57,6 +58,7 @@
 
 `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `LICENSE`,
 `.gitignore`, `.gitattributes`, `.editorconfig`, `docs/**`, `.githooks/**`,
+`protocol/**`, `tools/**`, `.github/CODEOWNERS`,
 `.github/workflows/ci-hygiene.yml`, `.github/workflows/release.yml`.
 
 Матрица объявлена в трёх местах и должна меняться во всех трёх сразу:
@@ -218,7 +220,7 @@ cd firmware/tests && make test-host
 ## Чего схема не решает
 
 Файлы разведены физически, а связь между ними — смысловая. Протокол
-описан в `firmware/protocol/status-contract.md` (контракт — источник
+описан в `protocol/status-contract.md` (контракт — источник
 истины формата) и реализован трижды: в
 `firmware/ESP32_BiAmp/ESP32_BiAmp.ino`, в
 `android-app/app/src/main/java/com/kilo/biampcontrol/bt/Protocol.kt` и в

@@ -1,6 +1,6 @@
 /*
  * Контрактный тест: дословный блок `status` из
- * firmware/protocol/status-contract.md, раздел 2.
+ * protocol/status-contract.md, раздел 2.
  *
  * Тест обязателен по разделу 5 контракта. Он ломается в двух случаях:
  *  1) прошивка добавила строку в блок `status`, а парсер её не знает —
@@ -24,7 +24,7 @@ class StatusContractTest {
 
     /**
      * Блок `status` прошивки v35.1 — читается ДОСЛОВНО из
-     * firmware/protocol/status-contract.md, раздел 2, функцией
+     * protocol/status-contract.md, раздел 2, функцией
      * [contractBlockOrSkip]. Порядок строк фиксирован, последняя — `Delay:`.
      *
      * Раньше блок хранился здесь цитатой. Цитата была верной, но её

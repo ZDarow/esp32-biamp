@@ -3,7 +3,7 @@
  *
  * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
  * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/protocol/status-contract.md, раздел 2.
+ * Формат команд и ответов — в protocol/status-contract.md, раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *

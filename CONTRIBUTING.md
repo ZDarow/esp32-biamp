@@ -357,7 +357,7 @@ git config core.hooksPath .githooks
 Приложение подстраивается под прошивку, а не наоборот.
 Прежде чем изменить формат команды или парсер в `android-app`,
 сверьтесь с `firmware/ESP32_BiAmp/ESP32_BiAmp.ino` и
-[контрактом v35.1](firmware/protocol/status-contract.md).
+[контрактом v35.1](protocol/status-contract.md).
 
 **Команда, которой нет в прошивке, будет молча проигнорирована
 устройством.** Это уже случалось: кнопка отправляла `meta`,
