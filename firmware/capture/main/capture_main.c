@@ -1,7 +1,7 @@
 // Сниффер цифрового выхода Master (ESP32 BiAmp) на ESP32-S3.
 //
 // Что делает: читает оба I²S-потока Master в подчинённом режиме, склеивает их
-// в один 4-канальный поток и отдаёт по нативному USB. Настройки Master,
+// в один 4-канальный поток и отдаёт по UART. Настройки Master,
 // прошивка и протокол не меняются — измеряется ровно то, что физически уходит
 // на провода, включая возможные ошибки на них.
 //
@@ -18,7 +18,8 @@
 #include <string.h>
 
 #include "driver/i2s_std.h"
-#include "driver/usb_serial_jtag.h"
+#include "driver/uart.h"
+#include "esp_console.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -77,18 +78,18 @@ static uint32_t s_warmup;
 static uint32_t s_frames, s_dropped[CAP_ZONES], s_max_skew, s_errors;
 
 // Счётчик принятых от хоста байт и флаг «хост вообще виден». Оба нужны для
-// диагностики нативного USB: UART — единственный порт, который работает всегда,
+// диагностики UART: UART — единственный порт, который работает всегда,
 // поэтому по нему видно, доходят ли команды до платы, даже если нативный порт
 // на ПК молчит.
 static volatile uint32_t s_rx_bytes;
 
-static int usb_write(const void *data, size_t len) {
+static int uart_write(const void *data, size_t len) {
   const uint8_t *p = (const uint8_t *)data;
   size_t left = len;
   while (left > 0) {
-    int w = usb_serial_jtag_write_bytes(p, left, pdMS_TO_TICKS(2000));
+    int w = uart_write_bytes(UART_NUM_0, p, left, pdMS_TO_TICKS(2000));
     if (w <= 0) {
-      ESP_LOGE(TAG, "usb_write: драйвер взял %d из %u байт", w, (unsigned)left);
+      ESP_LOGE(TAG, "uart_write: драйвер взял %d из %u байт", w, (unsigned)left);
       return -1;
     }
     p += (size_t)w;
@@ -97,7 +98,7 @@ static int usb_write(const void *data, size_t len) {
   return 0;
 }
 
-static void usb_puts(const char *s) { usb_write(s, strlen(s)); }
+static void uart_puts(const char *s) { uart_write(s, strlen(s)); }
 
 // ── чтение зон ──────────────────────────────────────────────────────────
 static void zone_task(void *arg) {
@@ -176,7 +177,7 @@ static void packer_task(void *arg) {
 
     if (avail[0] < CAP_OUT_BLOCK || avail[1] < CAP_OUT_BLOCK) {
       if (avail[0] >= CAP_ZRING_FRAMES || avail[1] >= CAP_ZRING_FRAMES) {
-        // Кольцо переполнено: USB не успевает. Продолжать со старого хвоста
+        // Кольцо переполнено: UART не успевает. Продолжать со старого хвоста
         // нельзя — в файл уйдёт мусор, который потом принимают за дефект DSP.
         portENTER_CRITICAL(&s_ring_mux);
         for (int z = 0; z < CAP_ZONES; z++) {
@@ -205,7 +206,7 @@ static void packer_task(void *arg) {
     portEXIT_CRITICAL(&s_ring_mux);
 
     s_frames += CAP_OUT_BLOCK;
-    if (usb_write(out, sizeof(out)) != 0) s_errors++;
+    if (uart_write(out, sizeof(out)) != 0) s_errors++;
   }
 }
 
@@ -223,12 +224,12 @@ static void stop_capture(void) {
     .reserved = 0,
     .magic_end = CAP_MAGIC_END,
   };
-  usb_write(&t, sizeof(t));
+  uart_write(&t, sizeof(t));
   char msg[128];
   snprintf(msg, sizeof(msg), "END frames=%" PRIu32 " dropped=%" PRIu32 "/%" PRIu32
                              " skew=%" PRIu32 " errors=%" PRIu32 "\n",
            t.frames, t.dropped_z1, t.dropped_z2, t.max_skew_frames, t.errors);
-  usb_puts(msg);
+  uart_puts(msg);
 }
 
 static bool start_capture(uint32_t seconds) {
@@ -265,8 +266,8 @@ static bool start_capture(uint32_t seconds) {
   };
   // Подтверждение приходит перед заголовком: после него поток уже чисто
   // двоичный, и любая строка посередине сбила бы выравнивание кадров у хоста.
-  usb_puts("GO\n");
-  if (usb_write(&h, sizeof(h)) != 0) return false;
+  uart_puts("GO\n");
+  if (uart_write(&h, sizeof(h)) != 0) return false;
 
   const int64_t now = esp_timer_get_time();
   // Запас на прогрев: кадры не пишутся CAP_WARMUP_FRAMES, значит до реального
@@ -279,8 +280,8 @@ static bool start_capture(uint32_t seconds) {
 }
 
 static void handle_command(const char *line) {
-  ESP_LOGI(TAG, "команда из нативного USB: %s", line);
-  if (strcmp(line, "PING") == 0) { usb_puts("PONG\n"); return; }
+  ESP_LOGI(TAG, "команда из UART: %s", line);
+  if (strcmp(line, "PING") == 0) { uart_puts("PONG\n"); return; }
   if (strcmp(line, "INFO") == 0) {
     char msg[192];
     snprintf(msg, sizeof(msg),
@@ -288,7 +289,7 @@ static void handle_command(const char *line) {
              "\n",
              CAP_CHANNELS, CAP_BITS, CAP_SLOT_BITS, CAP_DECLARED_RATE,
              CAP_FRAME_BYTES, CAP_WARMUP_FRAMES, s_rx_bytes);
-    usb_puts(msg);
+    uart_puts(msg);
     return;
   }
   if (strcmp(line, "STOP") == 0) { stop_capture(); return; }
@@ -296,11 +297,11 @@ static void handle_command(const char *line) {
     uint32_t sec = 10;
     const char *sp = strchr(line, ' ');
     if (sp) sec = (uint32_t)strtoul(sp + 1, NULL, 10);
-    if (sec == 0 || sec > 3600) { usb_puts("ERR bad seconds\n"); return; }
-    if (!start_capture(sec)) { usb_puts("ERR busy\n"); return; }
+    if (sec == 0 || sec > 3600) { uart_puts("ERR bad seconds\n"); return; }
+    if (!start_capture(sec)) { uart_puts("ERR busy\n"); return; }
     return;
   }
-  usb_puts("ERR unknown command\n");
+  uart_puts("ERR unknown command\n");
 }
 
 static void console_task(void *arg) {
@@ -311,7 +312,7 @@ static void console_task(void *arg) {
   for (;;) {
     CAP_WDT_RESET();
     uint8_t c;
-    if (usb_serial_jtag_read_bytes(&c, 1, 0) == 1) {
+    if (uart_read_bytes(UART_NUM_0, &c, 1, 0) == 1) {
       s_rx_bytes++;
       if (c == '\n' || c == '\r') {
         line[at] = '\0';
@@ -354,14 +355,20 @@ static esp_err_t init_zone(i2s_chan_handle_t *out, int port,
 }
 
 void app_main(void) {
-  ESP_LOGI(TAG, "старт: ставлю драйвер нативного USB");
-  usb_serial_jtag_driver_config_t usb_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-  usb_cfg.tx_buffer_size = 4096;
-  usb_cfg.rx_buffer_size = 1024;
-  ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_cfg));
-  ESP_LOGI(TAG, "нативный USB: драйвер=%d хост=%d",
-           usb_serial_jtag_is_driver_installed() ? 1 : 0,
-           usb_serial_jtag_is_connected() ? 1 : 0);
+  ESP_LOGI(TAG, "старт: ставлю драйвер UART0");
+  uart_config_t uart_cfg = {
+    .baud_rate = 921600,
+    .data_bits = UART_DATA_8_BITS,
+    .parity = UART_PARITY_DISABLE,
+    .stop_bits = UART_STOP_BITS_1,
+    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    .source_clk = UART_SCLK_DEFAULT,
+  };
+  ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 4096, 1024, 0, NULL, 0));
+  ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart_cfg));
+  ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+  esp_console_deinit();
+  ESP_LOGI(TAG, "UART0: драйвер установлен, консоль ESP-IDF отключена");
 
   ESP_LOGI(TAG, "выделяю кольца зон");
   for (int z = 0; z < CAP_ZONES; z++) {
@@ -377,7 +384,7 @@ void app_main(void) {
   ESP_ERROR_CHECK(init_zone(&s_z2, I2S_NUM_1, CAP_Z2_BCK, CAP_Z2_LRCK, CAP_Z2_DATA));
 
   ESP_LOGI(TAG, "создаю задачи");
-  // Читатели зон приоритетнее упаковщика: пока USB занят, кольца наполняются
+  // Читатели зон приоритетнее упаковщика: пока UART занят, кольца наполняются
   // сами по себе, и задерживать их незачем. Опора — вторая зона не должна
   // ждать первую.
   xTaskCreatePinnedToCore(zone_task, "zone0", 3072, (void *)(uintptr_t)0, 8, NULL, 1);
@@ -395,5 +402,5 @@ void app_main(void) {
                 "зона Z2 = I2S1 (BCK %d, LRCK %d, DATA %d)",
            CAP_Z1_BCK, CAP_Z1_LRCK, CAP_Z1_DATA,
            CAP_Z2_BCK, CAP_Z2_LRCK, CAP_Z2_DATA);
-  ESP_LOGI(TAG, "команды на нативном USB — PING, INFO, START <секунды>, STOP");
+  ESP_LOGI(TAG, "команды на UART — PING, INFO, START <секунды>, STOP");
 }

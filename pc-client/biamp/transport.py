@@ -32,6 +32,10 @@ class LineTransport(abc.ABC):
         self._disconnected = threading.Event()
         self._last_error: str = ""
         self._thread: threading.Thread | None = None
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 5
+        self._reconnect_backoff = 1.0
+        self._reconnect_timeout = 5.0
 
     @abc.abstractmethod
     def write(self, data: bytes) -> None: ...
@@ -101,6 +105,8 @@ class LineTransport(abc.ABC):
             try:
                 data = self._read()
                 backoff = 0.05
+                self._reconnect_attempts = 0
+                self._reconnect_backoff = 1.0
             except TransportError as exc:
                 self._last_error = str(exc)
                 self._disconnected.set()
@@ -108,12 +114,19 @@ class LineTransport(abc.ABC):
                     break
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 5.0)
+                if self._reconnect_attempts >= self._max_reconnect_attempts:
+                    self._last_error = "превышено максимальное количество попыток повторного подключения"
+                    continue
                 try:
+                    time.sleep(self._reconnect_backoff)
                     self._reconnect()
                     self._disconnected.clear()
                     self._last_error = ""
+                    self._reconnect_attempts += 1
+                    self._reconnect_backoff = min(self._reconnect_backoff * 2, 30.0)
                 except Exception as exc:
                     self._last_error = f"переподключение не удалось: {exc}"
+                    self._reconnect_attempts += 1
                 continue
             except Exception as exc:
                 self._last_error = f"ошибка приёма: {exc}"
@@ -147,7 +160,7 @@ class SerialTransport(LineTransport):
                 "не установлен pyserial — выполните: pip install -r requirements.txt"
             ) from exc
         try:
-            return serial.Serial(self._port_name, self._baud, timeout=self._timeout)
+            return serial.Serial(self._port_name, self._baud, timeout=self._timeout, write_timeout=self._reconnect_timeout)
         except Exception as exc:
             raise TransportError(f"не удалось открыть {self._port_name} @ {self._baud}: {exc}") from exc
 
@@ -156,7 +169,10 @@ class SerialTransport(LineTransport):
             self._serial.close()
         except Exception:
             pass
-        self._serial = self._open_serial()
+        try:
+            self._serial = self._open_serial()
+        except Exception as exc:
+            raise TransportError(f"не удалось открыть {self._port_name}: {exc}") from exc
 
     @property
     def description(self) -> str:
@@ -192,7 +208,7 @@ class TcpTransport(LineTransport):
 
     def _open_socket(self) -> socket.socket:
         try:
-            sock = socket.create_connection(self._address, timeout=5)
+            sock = socket.create_connection(self._address, timeout=self._reconnect_timeout)
         except OSError as exc:
             host, port = self._address[0], self._address[1]
             raise TransportError(f"не удалось подключиться к {host}:{port}: {exc}") from exc
@@ -208,7 +224,10 @@ class TcpTransport(LineTransport):
             self._socket.close()
         except OSError:
             pass
-        self._socket = self._open_socket()
+        try:
+            self._socket = self._open_socket()
+        except Exception as exc:
+            raise TransportError(f"не удалось подключиться к {self._address[0]}:{self._address[1]}: {exc}") from exc
 
     @property
     def description(self) -> str:
