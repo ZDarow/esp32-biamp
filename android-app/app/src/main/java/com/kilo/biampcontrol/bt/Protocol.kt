@@ -55,24 +55,19 @@ object Limits {
     const val XO_TYPE_MIN = 1
     const val XO_TYPE_MAX = 2
 
-    /**
-     * Заводские значения кроссовера: в прошивке `float fc_hz = 400.0f`,
-     * `float sub_hz = 45.0f` (ESP32_BiAmp.ino). Нужны для двойного тапа по
-     * ручке — вернуть частоту «в завод» из неё одной рукой не выходит,
-     * а список значений вручную держать в двух файлах опасно.
-     */
     const val FC_DEFAULT = 400f
     const val HP_DEFAULT = 45f
-
-    /**
-     * Длина команды: прошивка отбрасывает строки длиннее 62 байт UTF-8
-     * (раздел 4 контракта). Разрешённые символы ASCII, поэтому символы и
-     * байты совпадают и одного ограничения по длине достаточно.
-     */
     const val CMD_MAX_CHARS = 62
-
-    /** Символы, допустимые в команде: имя, двоеточие, точка, дефис. */
     val CMD_ALLOWED = Regex("[A-Za-z0-9:_.-]")
+}
+
+object StatusTokens {
+    const val ON = "ON"
+    const val OFF = "OFF"
+    const val ONE = "1"
+    const val ZERO = "0"
+    const val LR4 = "LR4"
+    const val BUTTER = "Butter"
 }
 
 /** Состояние устройства, распарсенное из ответа `status`. */
@@ -133,25 +128,17 @@ data class ParseResult(
 
 object StatusParser {
     private val reVol  = Regex("V0=(\\d+)%\\s+V1=(\\d+)%\\s+bal=(-?[\\d.]+)")
-    private val reFc   = Regex("Fc=([\\d.]+)Hz\\s+hp=([\\d.]+)Hz\\s+sub=(ON|OFF)")
+    private val reFc   = Regex("Fc=([\\d.]+)Hz\\s+hp=([\\d.]+)Hz\\s+sub=(${StatusTokens.ON}|${StatusTokens.OFF})")
     private val reTrim = Regex("TLF=(-?[\\d.]+)dB\\s+THF=(-?[\\d.]+)dB")
     private val reEq   = Regex("EQ:\\s*L=(-?[\\d.]+)\\s+M=(-?[\\d.]+)\\s+H=(-?[\\d.]+)")
-// v35.1: "Mute: 0/1" — абсолютное состояние зон, по нему же клиент шлёт mute:<z>:<0|1>
-    private val reMute = Regex("Mute:\\s*([01])/([01])")
-    // "SWP: N" и "DUP: N" приходят всегда, даже когда значения нулевые
-    private val reSwp  = Regex("SWP:\\s*([01])")
-    private val reDup  = Regex("DUP:\\s*([01])")
-    // ИСПРАВЛЕНО: парсит "BT: ON | SPP: ON" или "BT: ON"
-    private val reBt   = Regex("BT:\\s+(ON|OFF)(?:\\s*\\|\\s*SPP:\\s+(ON|OFF))?")
-    // "Test: 0 TVol=6%" — v29 добавил громкость тест-сигнала в ту же строку
+    private val reMute = Regex("Mute:\\s*(${StatusTokens.ONE}|${StatusTokens.ZERO})/(${StatusTokens.ONE}|${StatusTokens.ZERO})")
+    private val reSwp  = Regex("SWP:\\s*(${StatusTokens.ONE}|${StatusTokens.ZERO})")
+    private val reDup  = Regex("DUP:\\s*(${StatusTokens.ONE}|${StatusTokens.ZERO})")
+    private val reBt   = Regex("BT:\\s+(${StatusTokens.ON}|${StatusTokens.OFF})(?:\\s*\\|\\s*SPP:\\s+(${StatusTokens.ON}|${StatusTokens.OFF}))?")
     private val reTest = Regex("Test:\\s+(\\d+)(?:\\s+TVol=(\\d+)%)?")
-    // "Src: 48 kHz" — частота, согласованная по переговорам A2DP
     private val reSrc  = Regex("Src:\\s+([\\d.]+)\\s*kHz")
-    // v18: XO: Butter | XO: LR4; с v30 — ещё и " ON"/" OFF" (выключатель кроссовера)
-    private val reXo   = Regex("XO:\\s+(Butter|LR4)(?:\\s+(ON|OFF))?")
-    // v18: CHF: 0/0 0/0 0/0 0/0  (hp0/lp0 hp1/lp1 hp2/lp2 hp3/lp3)
+    private val reXo   = Regex("XO:\\s+(${StatusTokens.BUTTER}|${StatusTokens.LR4})(?:\\s+(${StatusTokens.ON}|${StatusTokens.OFF}))?")
     private val reChf  = Regex("CHF:\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)")
-    // v18: Delay: 0/0/0/0  — последняя строка блока status в прошивке
     private val reDly  = Regex("Delay:\\s+(\\d+)/(\\d+)/(\\d+)/(\\d+)")
 
     /**
@@ -253,7 +240,7 @@ object StatusParser {
                 s = s.copy(
                     fc = m.groupValues[1].toFloatOrNull() ?: s.fc,
                     hp = m.groupValues[2].toFloatOrNull() ?: s.hp,
-                    subOn = m.groupValues[3] == "ON"
+                    subOn = m.groupValues[3] == StatusTokens.ON
                 ); found = true; recognized = true
             }
             reTrim.find(l)?.let { m ->
@@ -269,15 +256,15 @@ object StatusParser {
                     eqh = m.groupValues[3].toFloatOrNull() ?: s.eqh
                 ); found = true; recognized = true
             }
-reMute.find(l)?.let { m ->
-                s = s.copy(muted = listOf(m.groupValues[1] == "1", m.groupValues[2] == "1"))
+ reMute.find(l)?.let { m ->
+                s = s.copy(muted = listOf(m.groupValues[1] == StatusTokens.ONE, m.groupValues[2] == StatusTokens.ONE))
                 found = true; recognized = true
             }
             reSwp.find(l)?.let { m ->
-                s = s.copy(swapped = m.groupValues[1] == "1"); found = true; recognized = true
+                s = s.copy(swapped = m.groupValues[1] == StatusTokens.ONE); found = true; recognized = true
             }
             reDup.find(l)?.let { m ->
-                s = s.copy(dup = m.groupValues[1] == "1"); found = true; recognized = true
+                s = s.copy(dup = m.groupValues[1] == StatusTokens.ONE); found = true; recognized = true
             }
             reBt.find(l)?.let { m ->
                 // У прошивки без поддержки `status` по SPP в строке есть только
@@ -285,8 +272,8 @@ reMute.find(l)?.let { m ->
                 // «SPP выключен»: иначе старый ответ гасил бы индикатор.
                 val spp = m.groupValues.getOrNull(2)
                 s = s.copy(
-                    btAudioOn = m.groupValues[1] == "ON",
-                    sppOn = if (spp.isNullOrEmpty()) s.sppOn else spp == "ON"
+                    btAudioOn = m.groupValues[1] == StatusTokens.ON,
+                    sppOn = if (spp.isNullOrEmpty()) s.sppOn else spp == StatusTokens.ON
                 ); found = true; recognized = true
             }
             reTest.find(l)?.let { m ->
@@ -300,11 +287,11 @@ reMute.find(l)?.let { m ->
             }
             reXo.find(l)?.let { m ->
                 s = s.copy(
-                    xoType = if (m.groupValues[1] == "LR4") 2 else 1,
+                    xoType = if (m.groupValues[1] == StatusTokens.LR4) 2 else 1,
                     // Старая прошивка без хвоста " ON"/" OFF" ничего не сообщает
                     // о выключателе: там кроссовер всегда включён, поэтому
                     // отсутствие группы означает ON, а не потерю связи.
-                    xoOn = m.groupValues.getOrNull(2) != "OFF"
+                    xoOn = m.groupValues.getOrNull(2) != StatusTokens.OFF
                 ); found = true; recognized = true
             }
             reChf.find(l)?.let { m ->
