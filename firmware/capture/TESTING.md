@@ -30,7 +30,7 @@ Master в подчинённом режиме и передаёт захваче
 |---|---|---|
 | COM8 | ESP32 (CH340) | Master: команды, `stats`, `status` |
 | COM11 | ESP32-S3 (CH9102) | S3 UART: прошивка, boot-лог |
-| COM12 | ESP32-S3 (нативный USB) | S3 команды `PING`/`START`/`STOP` + двоичный поток |
+| COM13 | ESP32-S3 (нативный USB) | S3 команды `PING`/`START`/`STOP` + двоичный поток |
 
 > ⚠️ Открытие COM8 дёргает DTR/RTS и перезагружает Master. Захват и `stats`
 > снимаются в одной сессии. COM11 не открывать через pyserial без управления
@@ -82,11 +82,25 @@ py -3.14 -m pip install pyserial numpy
 | `crosstalk` | `dup:0 tvol:4 tf:1000 test:1` | Утечка с Z1 НФ на остальные каналы |
 | `level-sweep` | `dup:0 tf:1000 test:all` (автоперебор tvol:1..6) | Пик/RMS/клип на каждом уровне |
 
+### Сигнал на линиях DAC
+
+Каждый отчёт теперь содержит раздел **«Сигнал на линиях DAC»**:
+
+| Канал | Пик, дБФС | RMS, дБФС | Щелчков | Сигнал | Клип |
+|---|---|---|---|---|---|
+| Z1 НЧ | ... | ... | ... | да/нет | да/нет |
+
+- **Все сигналы присутствуют** — все 4 канала имеют уровень выше порога
+- **Сигнал** — `да`, если пик > 1% от полной шкалы
+- **Клип** — `⚠️`, если пик > 99% от полной шкалы
+
+Это позволяет быстро проверить, что DAC подключен правильно и получает сигнал на всех линиях.
+
 ### Запуск
 
 ```powershell
 # Захват и анализ одного сценария
-py -3.14 firmware/tools/capture-analyze.py --sniffer COM12 --master COM8 --scenario dup
+    py -3.14 firmware/tools/capture-analyze.py --sniffer COM13 --master COM8 --scenario dup
 
 # Разбор готового файла без платы
 py -3.14 firmware/tools/capture-analyze.py --analyze captures/dup-…/capture.wav --scenario dup

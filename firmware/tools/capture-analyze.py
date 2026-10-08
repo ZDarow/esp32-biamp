@@ -17,8 +17,8 @@
 
 Примеры:
 
-    py capture-analyze.py --sniffer COM12 --master COM14 --scenario sweep
-    py capture-analyze.py --sniffer COM12 --master COM14 --scenario dup
+    py capture-analyze.py --sniffer COM13 --master COM14 --scenario sweep
+    py capture-analyze.py --sniffer COM13 --master COM14 --scenario dup
     py capture-analyze.py --analyze captures/dup/dup.wav
     py capture-analyze.py --list-scenarios
 
@@ -381,16 +381,20 @@ def channel_stats(x: np.ndarray) -> dict:
 
 
 def noise_floor(x: np.ndarray) -> dict:
-    # Края файла обрезаны настройкой записи, их уровень ничего не значит.
     core = x[len(x) // 10: -len(x) // 10] if len(x) > 40 else x
-    rms = float(np.sqrt(np.mean(core.astype(np.float64) ** 2))) if core.size else 0.0
+    if core.size == 0:
+        return {"noise_dbfs": -240.0, "noise_rms": 0.0}
+    rms = float(np.sqrt(np.mean(core.astype(np.float64) ** 2)))
     return {"noise_dbfs": db(rms / FULL_SCALE), "noise_rms": rms}
 
 
 def xcorr_lag(ref: np.ndarray, sig: np.ndarray, max_lag: int) -> dict:
     a = ref.astype(np.float64) - float(np.mean(ref))
     b = sig.astype(np.float64) - float(np.mean(sig))
-    n = 1 << int(math.ceil(math.log2(len(a) + len(b))))
+    total = len(a) + len(b)
+    if total <= 0:
+        return {"lag": 0, "quality": 0.0}
+    n = 1 << int(math.ceil(math.log2(total)))
     corr = np.fft.irfft(np.fft.rfft(a, n) * np.conj(np.fft.rfft(b, n)), n)
     corr = np.concatenate((corr[-max_lag:], corr[:max_lag + 1]))
     k = int(np.argmax(np.abs(corr)))
@@ -755,6 +759,47 @@ def delay_residual(base_lag: int, z2lf_lag: int, z2hf_lag: int, d_set: int) -> d
         "residual": measured_diff - predicted_diff,
         "zone_offset": -z2lf_lag - d_set,
     }
+
+
+def dac_signal_check(data: np.ndarray, rate: float) -> dict:
+    """Проверяет наличие сигнала на линиях DAC (параллельно снифферу).
+
+    DAC подключен параллельно I²S-шине, поэтому если сниффер получает данные,
+    DAC получает тот же сигнал. Проверка:
+      * сигнал присутствует (не тишина)
+      * уровень в ожидаемом диапазоне
+      * нет клиппинга
+      * нет разрывов (щелчков)
+    """
+    out = {"channels": []}
+    for i in range(data.shape[1]):
+        ch = data[:, i]
+        if ch.size == 0:
+            out["channels"].append({
+                "channel": CH_NAMES[i],
+                "peak": 0.0,
+                "peak_dbfs": -240.0,
+                "rms_dbfs": -240.0,
+                "clicks": 0,
+                "signal_present": False,
+                "clipping": False,
+            })
+            continue
+        peak = float(np.max(np.abs(ch)))
+        rms = float(np.sqrt(np.mean(ch.astype(np.float64) ** 2)))
+        clicks = click_scan(ch, rate)["count"]
+        out["channels"].append({
+            "channel": CH_NAMES[i],
+            "peak": peak,
+            "peak_dbfs": db(peak / FULL_SCALE),
+            "rms_dbfs": db(rms / FULL_SCALE),
+            "clicks": clicks,
+            "signal_present": peak > FULL_SCALE * 0.01,
+            "clipping": peak >= FULL_SCALE * 0.99,
+        })
+    out["all_signals_present"] = all(c["signal_present"] for c in out["channels"])
+    out["any_clipping"] = any(c["clipping"] for c in out["channels"])
+    return out
 def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | None,
             scenario: str | None, master_stats: dict | None = None) -> dict:
     meta = SCENARIOS.get(scenario or "", "")
@@ -797,6 +842,8 @@ def analyze(data: np.ndarray, rate: float, hdr: dict | None, trailer: dict | Non
 
     if scenario == "crosstalk":
         report["crosstalk"] = crosstalk_analysis(data, rate)
+
+    report["dac_signal"] = dac_signal_check(data, rate)
 
     if scenario == "delay":
         by_pair = {d["pair"]: d for d in report["delays"]}
@@ -926,6 +973,19 @@ def render_markdown(rep: dict) -> str:
             add(f"- остаток: {dc['residual']} отсчётов")
             add(f"- сдвиг между зонами в этом прогоне (справочно): "
                 f"{dc['zone_offset']} отсчётов")
+    if rep.get("dac_signal"):
+        ds = rep["dac_signal"]
+        add("")
+        add("## Сигнал на линиях DAC")
+        add("")
+        add(f"Все сигналы присутствуют: **{'да' if ds['all_signals_present'] else 'нет'}**")
+        add("")
+        add("| Канал | Пик, дБФС | RMS, дБФС | Щелчков | Сигнал | Клип |")
+        add("|---|---|---|---|---|---|")
+        for ch in ds["channels"]:
+            add(f"| {ch['channel']} | {fmt(ch['peak_dbfs'])} | {fmt(ch['rms_dbfs'])} | "
+                f"{ch['clicks']} | {'да' if ch['signal_present'] else 'нет'} | "
+                f"{'⚠️' if ch['clipping'] else 'нет'} |")
     if rep["tones"]:
         add("")
         add("## Тон")
