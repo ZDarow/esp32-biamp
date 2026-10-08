@@ -1,23 +1,25 @@
 # Плата — ESP32-S3-DevKitC-1. Консоль остаётся на UART0 (порт USB-UART через
-# мост на плате), чтобы нативный USB был занят только двоичным потоком:
-# printf в тот же порт смешал бы текст с отсчётами.
+# мост на плате), а данные захвата идут по тому же UART0. Нативный USB не
+# используется: на Windows драйвер VID_303A:PID_1001 нестабилен, а UART0 через
+# CH9102 работает всегда.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 
-# Для S3 ESP-IDF по умолчанию выбирает вторым каналом консоли USB_SERIAL_JTAG.
-# Здесь это не нужно: каждый ESP_LOGI уходит и в нативный USB, то есть текст
-# логов попадает в тот же поток, что и отсчёты, а запись мимо кольцевого
-# буфера драйвера ещё и конфликтует с упаковщиком.
+# Второй канал консоли не нужен: логи не должны попадать в поток захвата.
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # DevKitC-1 с модулем N8: 8 МБ флеша. Снимок 30 с — это 10 МБ, но прошивка
 # вместе с двумя I²S занимает мало, запас нужен на размер образа ESP-IDF.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
-# Захват читает DMA блоками по 64 кадра, USB пишет блоками по 4 КБ. Отладка
+# Захват читает DMA блоками по 64 кадра, UART пишет блоками по 4 КБ. Отладка
 # не нужна, скорость нужна: -Og дал бы лишние такты в цикле интерливинга.
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Защита стека и fortify: минимизируют последствия переполнения буфера.
+CONFIG_COMPILER_STACK_PROTECTOR=y
+CONFIG_COMPILER_FORTIFY_SOURCE=y
 
 # Тик FreeRTOS — 1 мс, а не стандартные 10 мс. Плата читает четыре канала и
 # склеивает их по номерам кадров, поэтому задержки в задачах задаются в
@@ -26,7 +28,7 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_FREERTOS_HZ=1000
 
 # Сторожевой таймер: задачи захвата блокируются на i2s_channel_read и на
-# usb_serial_jtag_write_bytes, и при зависшем хосте это выглядит как отсутствие
+# uart_write_bytes, и при зависшем хосте это выглядит как отсутствие
 # отклика. Десяти секунд хватает с большим запасом.
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 
@@ -38,3 +40,8 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 # будет поймано.
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+
+# Secure boot и шифрование флеша включены для защиты прошивки и данных.
+# Требуют предварительной генерации ключей через espsecure.py.
+CONFIG_SECURE_BOOT=y
+CONFIG_FLASH_ENC_ENABLED=y
