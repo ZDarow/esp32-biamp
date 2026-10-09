@@ -51,7 +51,7 @@ object Limits {
     const val TEST_VOL_MIN = 0
     const val TEST_VOL_MAX = 6
     const val TEST_MODE_MIN = 0
-    const val TEST_MODE_MAX = 4
+    const val TEST_MODE_MAX = 11
     const val XO_TYPE_MIN = 1
     const val XO_TYPE_MAX = 2
 
