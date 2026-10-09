@@ -64,6 +64,8 @@
  *             DUP: всегда в status; lr_swap восстановлен из NVS; защита factory/reboot по SPP;
  *             исправлена гонка click_*; BadSamples → RingBad (ошибки кольца в аудиозадаче);
  *             und/clip — сброс каждые 5 с задокументирован.
+ *        v35.1: нумерация версии приведена к реализованным фичам (абсолютный mute);
+ *             без изменений в поведении.
  *
  * @author Kilo
  * @license GNU General Public License v3.0 or later
@@ -86,6 +88,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <atomic>
+#include "biamp_globals.h"
 
 // Выводы I²S разведены по двум портам: каждому усилилю свой порт со своими
 // тремя выводами. Общие пины у портов быть не могут — иначе один порт
@@ -211,29 +214,8 @@ std::atomic<uint32_t> loop_max_ms{0}, nvs_max_ms{0};
 std::atomic<uint32_t> und_z[2] = {{0}, {0}};
 std::atomic<uint32_t> clip_cnt[4] = {{0}, {0}, {0}, {0}};
 std::atomic<uint32_t> ring_drops{0};
-// Счётчики задачи вывода: сколько блоков и кадров реально обработано.
+// Счётчики задачи вывода: сколько блоков и кадров действительно обработано.
 std::atomic<uint32_t> audio_blocks{0}, audio_frames{0}, audio_idle{0};
-
-// ===================== ПАРАМЕТРЫ АУДИО (снимок) =========================
-struct AudioParams {
-  float cb[8][3];
-  float ca[8][2];
-  float chb[4][2][3];
-  float cha[4][2][2];
-  float tlf, thf;
-  float bl, br;
-  float vol[2];
-  bool  mute[2];
-  uint16_t dly[4];
-  // Перестановка выходов Л/П едет в снимке, а не живёт отдельной глобалкой:
-  // задача вывода читает ap только через refreshParams(), поэтому и swap
-  // обязан приходить тем же снимком. Отдельная переменная, которую читает
-  // audioTask, а пишет loop, — это гонка: компилятор вправе переставить
-  // чтение относительно записи, и кадр может уйти с перепутанными каналами.
-  // Дублирование едет в том же снимке по той же причине.
-  bool  swap;
-  bool  dup;
-};
 
 static AudioParams shadow_ap;            // владеет loop, пишется под ctrl_mux
 static std::atomic<bool> ap_dirty{false};
@@ -256,27 +238,9 @@ static int16_t ring_buf[RING_FRAMES * 2];
 static uint32_t ring_w = 0, ring_r = 0;
 static std::atomic<bool>    ring_flush{false};
 
-struct EvLog { uint32_t ms; uint8_t type; uint16_t val; };
 static EvLog evbuf[16];
 static uint8_t ev_idx = 0;
 static portMUX_TYPE ev_mux = portMUX_INITIALIZER_UNLOCKED;
-
-// Блок сохранённых параметров. Объявлен здесь, а не в разделе NVS:
-// arduino-cli вставляет автопрототипы функций после этого блока глобальных
-// объявлений, и функция с параметром PBlob иначе не соберётся — тип ещё
-// не объявлен в момент генерации прототипа.
-struct PBlob {
-  uint32_t version;
-  float v0, v1, fc, hp, tlf, thf, eq0, eq1, eq2, bal, tvol;
-  float chh[4], chl[4];
-  uint16_t dly[4];
-  // xoon добавлен последним: так поля v21 остаются на прежних смещениях,
-  // и старый блоб можно принять целиком, а не сбрасывать настройки.
-  // invm переименован в swp на том же месте: инверсия фазы убрана,
-  // вместо неё перестановка Л/П. Размер и смещения не изменились,
-  // поэтому старый блоб читается как есть — просто его invm игнорируется.
-  uint8_t m0, m1, sub, xot, swp, xoon;
-} __attribute__((packed));
 
 constexpr uint32_t PBLOB_VERSION = 23;
 
@@ -1446,7 +1410,7 @@ void updateGeneralDisplay() {
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v35 (lr swap instead of phase inversion)"));
+  Serial.println(F("\n\nboot: bi-amp v35.1 (lr swap instead of phase inversion)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 

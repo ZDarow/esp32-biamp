@@ -94,6 +94,8 @@ extern std::atomic<uint32_t> ring_drops;
 extern std::atomic<uint32_t> audio_blocks, audio_frames, audio_idle;
 
 // ── Структуры ─────────────────────────────────────────────────────────
+struct EvLog { uint32_t ms; uint8_t type; uint16_t val; };
+
 struct AudioParams {
   float cb[8][3];
   float ca[8][2];
