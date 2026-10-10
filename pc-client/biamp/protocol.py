@@ -359,14 +359,14 @@ def parse_status(
                     state,
                     crossover_hz=_f(groups[0], state.crossover_hz),
                     sub_hp_hz=_f(groups[1], state.sub_hp_hz),
-                     sub_on=groups[2] == _BoolWord.ON.value,
+                    sub_on=groups[2] == _BoolWord.ON.value,
                 )
             elif kind == "xo":
                 xo_on_value = groups[1] if len(groups) > 1 and groups[1] is not None else _BoolWord.ON.value
                 state = _replace(
                     state,
                     crossover_type=2 if groups[0] == "LR4" else 1,
-                     xo_on=xo_on_value == _BoolWord.ON.value,
+                    xo_on=xo_on_value == _BoolWord.ON.value,
                 )
             elif kind == "tilt":
                 state = _replace(
