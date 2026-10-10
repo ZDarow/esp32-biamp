@@ -160,7 +160,12 @@ class SerialTransport(LineTransport):
                 "не установлен pyserial — выполните: pip install -r requirements.txt"
             ) from exc
         try:
-            return serial.Serial(self._port_name, self._baud, timeout=self._timeout, write_timeout=self._reconnect_timeout)
+            return serial.Serial(
+                self._port_name,
+                self._baud,
+                timeout=self._timeout,
+                write_timeout=self._reconnect_timeout,
+            )
         except Exception as exc:
             raise TransportError(f"не удалось открыть {self._port_name} @ {self._baud}: {exc}") from exc
 
@@ -227,7 +232,9 @@ class TcpTransport(LineTransport):
         try:
             self._socket = self._open_socket()
         except Exception as exc:
-            raise TransportError(f"не удалось подключиться к {self._address[0]}:{self._address[1]}: {exc}") from exc
+            raise TransportError(
+                f"не удалось подключиться к {self._address[0]}:{self._address[1]}: {exc}"
+            ) from exc
 
     @property
     def description(self) -> str:
