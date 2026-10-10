@@ -5,10 +5,12 @@
 # чужие файлы, а не разнесением веток.
 #
 # Владелец определяется по имени текущей ветки:
-#   firmware/*, firmware-dev  -> firmware
-#   android/*,  android-dev   -> android
-#   pc-client/*, pc-client-dev -> pc-client
-#   main, master, feature/*   -> проверка не выполняется
+#   firmware/*, firmware-dev    -> firmware
+#   android/*,  android-dev     -> android
+#   web/*,     web-dev         -> web
+#   verify/*,  verify-dev      -> verify
+#   pc-client/*, pc-client-dev  -> web  (историческое имя ветки)
+#   main, master, feature/*     -> проверка не выполняется
 #
 # Общие файлы (README, AGENTS, CONTRIBUTING, docs/, .githooks/) править
 # можно из любой ветки: они иначе и были бы источником конфликтов.
@@ -28,16 +30,29 @@ branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 case "$branch" in
 	firmware | firmware/* | firmware-*) owner="firmware" ;;
 	android | android/* | android-*) owner="android" ;;
-	pc-client | pc-client/* | pc-client-*) owner="pc-client" ;;
+	web | web/* | web-*) owner="web" ;;
+	# Ветка называлась pc-client-dev, когда направление называлось «клиент ПК».
+	# Имя ветки оставлено как есть, чтобы не терять её историю и ссылки.
+	pc-client | pc-client/* | pc-client-*) owner="web" ;;
+	verify | verify/* | verify-*) owner="verify" ;;
 	*) exit 0 ;;
 esac
 
-# Кто владеет путём: firmware | android | pc-client | shared | unknown
+# Кто владеет путём: firmware | android | web | verify | shared | unknown
+#
+# ПОРЯДОК ВАЖЕН: в case первый подошедший шаблон выигрывает, поэтому более
+# узкие правила стоят выше широких. Направлению проверок принадлежит
+# firmware/capture/, но firmware/** целиком принадлежит прошивке — без
+# более узкого правила первым совпал бы широкий, и проверки не смогли бы
+# править сниффер.
 path_owner() {
 	case "$1" in
+	firmware/capture/* | firmware/capture) echo "verify" ;;
+	firmware/tools/capture-analyze.py) echo "verify" ;;
+	.github/workflows/ci-verify.yml) echo "verify" ;;
 	firmware/* | SECURITY.md | .github/workflows/ci-firmware.yml) echo "firmware" ;;
 	android-app/* | .github/workflows/ci-android.yml) echo "android" ;;
-	pc-client/* | .github/workflows/ci-pc-client.yml) echo "pc-client" ;;
+	pc-client/* | .github/workflows/ci-pc-client.yml) echo "web" ;;
 	README.md | AGENTS.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | LICENSE | NOTICE) echo "shared" ;;
 	.gitignore | .gitattributes | .editorconfig) echo "shared" ;;
 	docs/* | .githooks/* | tools/*) echo "shared" ;;
@@ -50,7 +65,8 @@ own_label() {
 	case "$1" in
 	firmware) echo "прошивка (firmware)" ;;
 	android) echo "приложение Android (android)" ;;
-	pc-client) echo "клиент ПК (pc-client)" ;;
+	web) echo "веб-панель и клиент ПК (web)" ;;
+	verify) echo "проверки и измерения (verify)" ;;
 	shared) echo "общий файл" ;;
 	*) echo "никем не описан" ;;
 	esac
@@ -71,25 +87,82 @@ for f in $(git diff --cached --name-only); do
 done
 
 if [ -n "$blocked" ]; then
-	echo "Отказ: ветка $branch принадлежит направлению «$(own_label "$owner")»,"
-	echo "а в коммите есть файлы других направлений."
-	echo ""
-	echo "Чужие файлы:"
-	for f in $blocked; do
-		echo "  $f  ->  $(own_label "$(path_owner "$f")")"
-	done
-	echo ""
-	echo "Как поступить:"
-	echo "  1. Убрать чужие файлы из индекса:  git restore --staged <файл>"
-	echo "  2. Создать отдельную ветку от main под эти файлы и смержить её."
-	echo "  3. Если правка всё же нужна здесь — описание в docs/BRANCHING.md,"
-	echo "     обход: git commit --no-verify"
-	echo ""
-	echo "Матрица владения: docs/BRANCHING.md, .github/CODEOWNERS"
-	exit 1
-fi
+		echo "Отказ: ветка $branch принадлежит направлению «$(own_label "$owner")»,"
+		echo "а в коммите есть файлы других направлений."
+		echo ""
+		echo "Чужие файлы:"
+		for f in $blocked; do
+			echo "  $f  ->  $(own_label "$(path_owner "$f")")"
+		done
+		echo ""
+		echo "Как поступить:"
+		echo "  1. Убрать чужие файлы из индекса:  git restore --staged <файл>"
+		echo "  2. Создать отдельную ветку от main под эти файлы и смержить её."
+		echo "  3. Если правка всё же нужна здесь — описание в docs/BRANCHING.md,"
+		echo "     обход: git commit --no-verify"
+		echo ""
+		echo "Матрица владения: docs/BRANCHING.md, .github/CODEOWNERS"
+		exit 1
+	fi
 
-if [ -n "$shared_touched" ]; then
+	# ── Проверка 2: код не должен собираться с мусором ──────────────────
+	# Кэши, отчёты, бинарники — всё это не должно попадать в историю.
+	# .gitignore это отсекает при добавлении, но проверка не мешает.
+	for f in $(git diff --cached --name-only); do
+		case "$f" in
+			*.pyc|__pycache__/*|.mypy_cache/*|.ruff_cache/*|.pytest_cache/*\
+			|.gradle/*|.kotlin/*|*/build/*|*.apk|*.aab|*.bin|*.elf|*.hex|*.map\
+			|output-metadata.json|*.pcap|*.pcapng|*.log|*.p12|*.jks|*.keystore\
+			|.env|.env.*|local.properties|*.tmp|*.bak|*.orig|*.rej)
+				echo "Отказ: в коммит попадает служебный файл: $f"
+				echo "Уберите его из индекса: git restore --staged $f"
+				exit 1 ;;
+		esac
+	done
+
+	# ── Проверка 3: локальный линтер (только если инструменты доступны) ──
+	# Быстро (секунды), не блокирует разработку при отсутствии toolchain.
+	if [ "${SKIP_LINT:-0}" = "0" ]; then
+		if [ -d pc-client ] && command -v ruff >/dev/null 2>&1; then
+			if ! ruff check pc-client >/dev/null 2>&1; then
+				echo "Отказ: ruff нашёл нарушения в pc-client:"
+				ruff check pc-client 2>&1 | head -20
+				exit 1
+			fi
+		fi
+		if [ -d pc-client ] && command -v mypy >/dev/null 2>&1; then
+			if ! mypy pc-client >/dev/null 2>&1; then
+				echo "Отказ: mypy нашёл ошибки типов в pc-client:"
+				mypy pc-client 2>&1 | head -20
+				exit 1
+			fi
+		fi
+		# ── Проверка 4: в Kotlin не должно быть hardcoded strings ──────────
+		# Имена строк идентифицируются по R.string.<name>; без него —
+		# мусор в интерфейсе, который не локализуется (см. AGENTS.md).
+		if [ -d android-app/app/src/main/java ]; then
+			hardcoded=$(grep -rn '"[А-Яа-я][^"]*"' \
+				android-app/app/src/main/java/com/kilo/biampcontrol/ui/ \
+				2>/dev/null | grep -v 'R\.string\|@[A-Z]\|\"\\\\n\|\"\\\\t\|\"\\\\%' \
+				| grep -v '//' | head -10)
+			if [ -n "$hardcoded" ]; then
+				echo "Замечание: в Kotlin обнаружены hardcoded строки (возможно, не локализованные):"
+				echo "$hardcoded"
+			fi
+		fi
+		# ── Проверка 5: команда в коде есть в прошивке ─────────────────────
+		# Команда, которой нет в ESP32_BiAmp.ino, будет молча проигнорирована.
+		if [ -f firmware/ESP32_BiAmp/ESP32_BiAmp.ino ]; then
+			for cmd in $(grep -oh '"[a-z]*:' android-app/app/src/main/java/com/kilo/biampcontrol/bt/Protocol.kt 2>/dev/null | tr -d '"'); do
+				cmd_name="${cmd%:}"
+				if ! grep -q "\"$cmd_name:" firmware/ESP32_BiAmp/ESP32_BiAmp.ino 2>/dev/null; then
+					echo "Замечание: команда '$cmd_name:' в Protocol.kt, но отсутствует в прошивке — будет проигнорирована."
+				fi
+			done
+		fi
+	fi
+
+	if [ -n "$shared_touched" ]; then
 	echo "Замечание: вместе со своими файлами изменены общие."
 	echo "Общие файлы — источник конфликтов при слиянии, проверьте правку:"
 	for f in $shared_touched; do

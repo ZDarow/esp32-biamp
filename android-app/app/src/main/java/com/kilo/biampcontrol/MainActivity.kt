@@ -50,9 +50,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.activity.viewModels
 import com.kilo.biampcontrol.bt.ConnState
+import com.kilo.biampcontrol.bt.MacAddress
+import com.kilo.biampcontrol.ui.ChoiceButton
+import com.kilo.biampcontrol.ui.ConnectionOverlay
 import com.kilo.biampcontrol.ui.DspTab
 import com.kilo.biampcontrol.ui.ServiceTab
 import com.kilo.biampcontrol.ui.VolumeTab
+import com.kilo.biampcontrol.ui.connectionOverlayVisible
 import com.kilo.biampcontrol.ui.semanticsMerge
 import com.kilo.biampcontrol.ui.theme.BiAmpTheme
 
@@ -127,7 +131,7 @@ internal fun connColor(state: ConnState): Color = when (state) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: BiAmpViewModel) {
-val connState by vm.connState.collectAsState()
+    val connState by vm.connState.collectAsState()
     val devices by vm.devices.collectAsState()
     val ctx = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -159,7 +163,7 @@ val tabs = listOf(
 
     Scaffold(
         topBar = {
-TopAppBar(
+            TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     // Одна кнопка на всё: сам факт нажатия и цвет значка
@@ -213,9 +217,23 @@ TopAppBar(
         }
     }
 
+    // Оверлей идёт после Scaffold, поэтому лежит поверх всего, включая
+    // верхнюю панель: подключение — это состояние всего приложения, а не
+    // одной вкладки.
+    if (connectionOverlayVisible(connState, showDevicePicker)) {
+        ConnectionOverlay(
+            state = connState,
+            deviceName = vm.rememberedName,
+            onCancel = { vm.disconnect() },
+            onPickDevice = { showDevicePicker = true }
+        )
+    }
+
     if (showDevicePicker) {
         val autoOn by vm.autoConnect.collectAsState()
         val remembered = vm.rememberedName
+        var macInput by remember { mutableStateOf("") }
+        var macError by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showDevicePicker = false },
             title = { Text(stringResource(R.string.device_picker_title)) },
@@ -235,6 +253,34 @@ TopAppBar(
                             Text(dev.name ?: dev.address)
                         }
                     }
+                    HorizontalDivider()
+                    OutlinedTextField(
+                        value = macInput,
+                        onValueChange = { macInput = it; macError = false },
+                        label = { Text(stringResource(R.string.mac_label)) },
+                        placeholder = { Text(stringResource(R.string.mac_hint)) },
+                        isError = macError,
+                        supportingText = {
+                            if (macError) {
+                                Text(stringResource(R.string.mac_invalid))
+                            }
+                        },
+                        singleLine = true,
+                        enabled = devices.isEmpty() || MacAddress.isValid(macInput),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    ChoiceButton(
+                        label = stringResource(R.string.mac_connect),
+                        onClick = {
+                            if (vm.connectByAddress(ctx, macInput)) {
+                                showDevicePicker = false
+                            } else {
+                                macError = true
+                            }
+                        },
+                        enabled = MacAddress.isValid(macInput),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     if (remembered != null) {
                         HorizontalDivider()
                         Row(

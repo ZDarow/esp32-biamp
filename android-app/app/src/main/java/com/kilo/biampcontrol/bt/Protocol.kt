@@ -56,6 +56,15 @@ object Limits {
     const val XO_TYPE_MAX = 2
 
     /**
+     * Заводские значения кроссовера: в прошивке `float fc_hz = 400.0f`,
+     * `float sub_hz = 45.0f` (ESP32_BiAmp.ino). Нужны для двойного тапа по
+     * ручке — вернуть частоту «в завод» из неё одной рукой не выходит,
+     * а список значений вручную держать в двух файлах опасно.
+     */
+    const val FC_DEFAULT = 400f
+    const val HP_DEFAULT = 45f
+
+    /**
      * Длина команды: прошивка отбрасывает строки длиннее 62 байт UTF-8
      * (раздел 4 контракта). Разрешённые символы ASCII, поэтому символы и
      * байты совпадают и одного ограничения по длине достаточно.
@@ -163,6 +172,37 @@ object StatusParser {
      * принят целиком, и может очистить буфер строк.
      */
     fun isBlockEnd(line: String): Boolean = reDly.containsMatchIn(line)
+
+    /**
+     * Признак первой строки блока `status`.
+     *
+     * Блок всегда начинается со строки громкости, и по ней буфер строк
+     * очищается перед разбором. Раньше очистка шла по отправке команды
+     * `status`, и periodic-опрос, попавший в середину уже идущего блока,
+     * обрезал его: в буфере оставался хвост без начала, состояние собиралось
+     * из половины полей, а часть значений оставалась прежней. Очистка по
+     * факту прихода новой первой строки от такого обрыва не зависит.
+     */
+    fun isBlockStart(line: String): Boolean = reVol.containsMatchIn(line)
+
+    /**
+     * Кладёт строку в буфер блока, обнуляя его на начале нового блока.
+     *
+     * Политика буфера живёт здесь, а не в ViewModel, чтобы её можно было
+     * проверить обычным тестом: ViewModel только накапливает строки и по
+     * `Delay:` применяет разобранное состояние.
+     *
+     * @param maxLines сколько строк держать; лишние отбрасываются с начала.
+     * @return `true`, если строка открыла новый блок, то есть буфер очищен.
+     */
+    fun appendToBlock(buffer: MutableList<String>, line: String, maxLines: Int): Boolean {
+        if (!isStatusLine(line)) return false
+        val started = isBlockStart(line)
+        if (started) buffer.clear()
+        buffer.add(line)
+        while (buffer.size > maxLines) buffer.removeAt(0)
+        return started
+    }
 
     /** Строка принадлежит блоку `status` (любой из 13 строк контракта). */
     fun isStatusLine(line: String): Boolean = allLinePatterns.any { it.containsMatchIn(line) }

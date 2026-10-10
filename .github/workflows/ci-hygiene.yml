@@ -2,7 +2,7 @@ name: 'CI: гигиена'
 
 on:
   push:
-    branches: [main, firmware-dev, android-dev, pc-client-dev]
+    branches: [main, firmware-dev, android-dev, pc-client-dev, verify-dev]
   pull_request:
     branches: [main]
   workflow_dispatch:

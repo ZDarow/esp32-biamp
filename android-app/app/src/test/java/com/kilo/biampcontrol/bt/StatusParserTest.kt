@@ -104,6 +104,57 @@ assertEquals(listOf(false, true), s.muted)
     }
 
     @Test
+    fun `первая строка блока опознаётся по громкости`() {
+        assertTrue(StatusParser.isBlockStart("V0=11% V1=11% bal=0.00"))
+        assertTrue(StatusParser.isBlockStart("V0=38% V1=42% bal=-1.50"))
+        assertFalse(StatusParser.isBlockStart("Fc=350Hz hp=45Hz sub=ON"))
+        assertFalse(StatusParser.isBlockStart("Delay: 0/0/0/0"))
+    }
+
+    @Test
+    fun `новый блок не смешивается с хвостом предыдущего`() {
+        // Сценарий, из-за которого буфер чистится по началу блока: опрос
+        // пришёл в середину идущего блока, его хвост остался в буфере, и
+        // следующий полный блок должен заменить его целиком.
+        val buf = ArrayDeque<String>()
+        blockV35.drop(6).forEach { StatusParser.appendToBlock(buf, it, 13) }
+        assertTrue("хвост предыдущего блока должен лежать в буфере", buf.size == 7)
+        blockV35.forEach { StatusParser.appendToBlock(buf, it, 13) }
+
+        assertEquals("в буфере должен лежать ровно один блок", blockV35, buf.toList())
+    }
+
+    @Test
+    fun `буфер не растёт дальше предела и отбрасывает начало`() {
+        val buf = ArrayDeque<String>()
+        // Два блока подряд без замыкающей строки Delay: предел держится.
+        (blockV35 + blockV35).forEach { StatusParser.appendToBlock(buf, it, 13) }
+        assertEquals(13, buf.size)
+        assertTrue(buf.all { StatusParser.isStatusLine(it) })
+    }
+
+    @Test
+    fun `строка вне блока в буфер не попадает`() {
+        val buf = ArrayDeque<String>()
+        assertFalse(StatusParser.appendToBlock(buf, "help: 1/12", 13))
+        assertTrue(buf.isEmpty())
+    }
+
+    @Test
+    fun `громкость тест-сигнала зажимается в пределы контракта`() {
+        // Контракт v35.1: TVol — 0..6 %, и прошивка тоже ограничивает 0.06.
+        // Значение вне диапазона в тестовых блоках раньше проскакивало незамеченным
+        // и роняло тесты на ровном месте, поэтому проверка тут же.
+        val s = requireNotNull(StatusParser.parse(listOf("Test: 0 TVol=9%")))
+        assertEquals(0, s.testMode)
+        assertEquals(Limits.TEST_VOL_MAX, s.testVol)
+
+        val ok = requireNotNull(StatusParser.parse(listOf("Test: 3 TVol=5%")))
+        assertEquals(3, ok.testMode)
+        assertEquals(5, ok.testVol)
+    }
+
+    @Test
     fun `мусор не разбирается в состояние`() {
         assertNull(StatusParser.parse(listOf("", "OK", ">", "garbage 123")))
     }

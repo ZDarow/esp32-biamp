@@ -90,7 +90,7 @@ class MainScreenTest {
         "DUP: 0",
         "BT: ON | SPP: ON",
         "Src: 48.0 kHz",
-        "Test: 0 TVol=9%",
+        "Test: 0 TVol=6%",
         "CHF: 31/3150 0/0 31/3150 0/0",
         "Delay: 0/0/0/0"
     )
@@ -214,7 +214,7 @@ class MainScreenTest {
         // блока не отработал, здесь был бы дефолт «10». Совпадений может быть
         // два — та же строка попадает в лог SPP, поэтому берём первый узел.
         compose.onAllNodesWithText("V0=38% V1=42% bal=-1.5")[0].assertIsDisplayed()
-        compose.onAllNodesWithText("Test: 0 TVol=9%")[0].assertIsDisplayed()
+        compose.onAllNodesWithText("Test: 0 TVol=6%")[0].assertIsDisplayed()
     }
 
     @Test
@@ -227,8 +227,23 @@ class MainScreenTest {
         compose.onNodeWithText(str(R.string.docs_button)).performScrollTo().performClick()
         compose.waitForIdle()
 
-        // Заголовок окна — верх диалога; текст внутри длинный и прокручиваемый.
+        // Заголовок — верх шторки; текст внутри длинный и прокручиваемый.
         compose.onNodeWithText(str(R.string.docs_dialog_title)).assertIsDisplayed()
+        compose.onNodeWithText(str(R.string.docs_sheet_hint)).assertIsDisplayed()
+    }
+
+    @Test
+    fun шторкаДокументацииЗакрываетсяКрестиком() {
+        compose.onNodeWithText(str(R.string.tab_service)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(str(R.string.docs_button)).performScrollTo().performClick()
+        compose.waitForIdle()
+
+        // Крестик в шапке шторки: закрывать её пальцем по тексту неудобно.
+        compose.onNodeWithContentDescription(str(R.string.close)).performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(str(R.string.docs_dialog_title)).doesNotExist()
     }
 
     @Test

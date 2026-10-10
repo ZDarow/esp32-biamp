@@ -123,10 +123,12 @@ constructor(app: Application) : this(app, { SppManager(it) })
     private fun requestStatusSync() {
         isSyncing.value = true
         syncRequestedAt = System.currentTimeMillis()
-        // Буфер очищается ДО отправки: недобранный хвост прошлого опроса
-        // не должен смешаться с новым блоком, иначе в состояние попадут
-        // значения двух разных моментов времени.
-        statusBuffer.clear()
+        // Буфер НЕ очищается здесь: он чистится по первой строке пришедшего
+        // блока ([StatusParser.isBlockStart]). Очистка здесь обрезала блок,
+        // который уже идёт от усилителя, если запрос пришёл в его середину:
+        // в буфере оставался хвост без начала, и часть полей состояния
+        // оставалась прежней. Остаток прошлой сессии очищается при CONNECTED
+        // и после разбора полного блока.
         sender.send("status", true)
     }
 
@@ -152,6 +154,34 @@ constructor(app: Application) : this(app, { SppManager(it) })
     fun connect(dev: BluetoothDevice) {
         prefs.remember(dev)
         spp.connect(dev)
+    }
+
+    /**
+     * Подключение по введённому вручную адресу.
+     *
+     * Единственный способ добраться до усилителя, который не сопряжён с
+     * этим телефоном: Android показывает в списке только сопряжённые
+     * устройства, а прошивка не пишет MAC в NVS и не восстанавливает его
+     * после сброса — то есть после «заводского сброса» телефон о нём
+     * забывает. Адрес приходится вводить руками.
+     *
+     * Невалидный адрес и отсутствие адаптера дают `false`: вызывающий
+     * покажет сообщение сам, ViewModel не занимается диалогами.
+     */
+    @SuppressLint("MissingPermission")
+    fun connectByAddress(context: Context, input: String): Boolean {
+        val mac = MacAddress.normalize(input) ?: return false
+        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
+            .adapter ?: return false
+        val dev = try {
+            adapter.getRemoteDevice(mac)
+        } catch (_: IllegalArgumentException) {
+            return false
+        } catch (_: SecurityException) {
+            return false
+        }
+        connect(dev)
+        return true
     }
 
     /**
@@ -292,9 +322,10 @@ constructor(app: Application) : this(app, { SppManager(it) })
 
     // ── Приём ───────────────────────────────────────────────────
     private fun onLine(line: String) {
-        if (StatusParser.isStatusLine(line)) {
-            statusBuffer.addLast(line)
-            if (statusBuffer.size > STATUS_LINES) statusBuffer.removeFirst()
+        // Политика буфера (обнуление на начале блока, отбрасывание лишнего)
+        // живёт в парсере: здесь только накопление и разбор.
+        val blockStarted = StatusParser.appendToBlock(statusBuffer, line, STATUS_LINES)
+        if (blockStarted || StatusParser.isStatusLine(line)) {
             // Разбор идёт поверх текущего состояния, а не поверх значений по
             // умолчанию: блок status приходит 13 строками, и на первых
             // двенадцати в буфере ещё нет, например, строки Delay. Разбор с

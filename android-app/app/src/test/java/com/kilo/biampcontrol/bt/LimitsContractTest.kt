@@ -229,7 +229,10 @@ class LimitsContractTest {
         val numeric = Limits::class.java.declaredFields
             .filterNot { it.name.startsWith("$") }
             .filter { it.type == Float::class.javaPrimitiveType || it.type == Int::class.javaPrimitiveType }
-            .filter { it.name != "CMD_MAX_CHARS" }
+            // CMD_MAX_CHARS — длина строки, а не диапазон; FC_DEFAULT/HP_DEFAULT —
+            // заводские значения, а не границы. Ни то, ни другое не описано в
+            // таблице диапазонов раздела 4, и проверять их там бессмысленно.
+            .filter { it.name !in SET_OF_NONRANGE_CONSTANTS }
             .map { it.name }
             .sorted()
 
@@ -292,7 +295,13 @@ class LimitsContractTest {
             // поэтому константы TEST_MODE_* проверяются на ОПИСАНИЕ в таблице,
             // а числовые границы остаются в coerceIn() парсера.
             "TEST_MODE_MIN" to "test:", "TEST_MODE_MAX" to "test:",
+            // Заводские значения, а не границы: в контракте не описаны, но
+            // без них двойной тап по ручке не вернёт частоту «в завод».
+            "FC_DEFAULT" to "fc:", "HP_DEFAULT" to "hp:",
         )
+
+        /** Константы, которых нет и не должно быть в таблице диапазонов. */
+        val SET_OF_NONRANGE_CONSTANTS = setOf("CMD_MAX_CHARS", "FC_DEFAULT", "HP_DEFAULT")
     }
 }
 

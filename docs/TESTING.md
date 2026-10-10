@@ -124,8 +124,8 @@ git commit -m "..."                    # хук отклонит чужие пу
 ### Что должно быть в логе при старте
 
 ```
-boot: bi-amp v34 (dsp reset, fade out, click probe)
-NVS: blob loaded (v22)
+boot: bi-amp v35 (lr swap instead of phase inversion)
+NVS: blob loaded (v23)
 Ring selftest: PASS
 A2DP: started
 SPP: OK
@@ -135,13 +135,14 @@ SPP: OK
 
 ```
 RingDrops: 0
-BadSamples: 0
+SelfTestErr: 0
 Underrun: Z1=0 Z2=0
 Clips: 0/0/0/0
 ```
 
-`BadSamples` ненулевое означает порчу кадров в кольце, `RingDrops` — потери,
-`Underrun` — недокорм I2S. Ни одно из этих значений не должно ненулевым.
+`SelfTestErr` ненулевое означает ошибки стартового самотеста кольца,
+`RingDrops` — потери, `Underrun` — недокорм I2S. Ни одно из этих
+значений не должно быть ненулевым.
 
 ### Диагностические команды
 
@@ -149,8 +150,9 @@ Clips: 0/0/0/0
 pwsh -File .\firmware\tools\monitor.ps1 -Port COM14 -Commands "status,stats" -Seconds 5
 ```
 
-Блок `status` — 11 строк, замыкается строкой `Delay: n/n/n/n`. Если блок не
+Блок `status` — 13 строк, замыкается строкой `Delay: n/n/n/n`. Если блок не
 замкнулся, парсер приложения ждёт следующего опроса и не обновит экран.
+Полный формат — `firmware/protocol/status-contract.md`.
 
 ### Проверка границ потока
 

@@ -43,15 +43,25 @@ android-app/             приложение управления (Kotlin, Jetp
 
 | Направление | Ветка | Свои пути |
 |---|---|---|
-| Прошивка ESP32 | `firmware-dev` | `firmware/**`, `SECURITY.md`, `.github/workflows/ci-firmware.yml` |
+| Прошивка ESP32 | `firmware-dev` | `firmware/**` (кроме `capture/` и `tools/capture-analyze.py`), `SECURITY.md`, `.github/workflows/ci-firmware.yml` |
 | Приложение Android | `android-dev` | `android-app/**`, `.github/workflows/ci-android.yml` |
-| Клиент для ПК | `pc-client-dev` | `pc-client/**`, `.github/workflows/ci-pc-client.yml` |
+| Веб-панель и клиент ПК | `pc-client-dev` | `pc-client/**`, `.github/workflows/ci-pc-client.yml` |
+| Проверки и измерения | `verify-dev` | `firmware/capture/**`, `firmware/tools/capture-analyze.py`, `.github/workflows/ci-verify.yml` |
+
+Проверки выделены из прошивки: сниффер `firmware/capture/`, анализатор
+захватов и методика аудита — измерение результата, а не сам DSP. Но
+**протокол проверки не пишут**: `firmware/ESP32_BiAmp/` остаётся за
+прошивкой, иначе методика аудита перестанет быть независимой.
 
 Общие файлы (`README.md`, `AGENTS.md`, `docs/**`, `.githooks/**`) править
 можно от любого направления, но отдельным коммитом — иначе они становятся
 причиной конфликта при слиянии.
 
 Один раз в клоне: `git config core.hooksPath .githooks`.
+
+Один worktree на направление — иначе правки смешиваются в одном дереве и
+блокируют переключение ветки. Замеры требуют единственного Master: два
+прогона одновременно невозможны, порядок «замерить → прошить → перемерить».
 
 Подробности, команды слияния и границы применимости — `docs/BRANCHING.md`.
 

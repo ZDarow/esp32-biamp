@@ -82,10 +82,10 @@ fun DspTab(vm: BiAmpViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
                        label = { Text("Butterworth") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
+                      modifier = Modifier.weight(1f))
             FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
                        label = { Text("LR4") }, enabled = xoEnabled,
-                       modifier = Modifier.weight(1f))
+                      modifier = Modifier.weight(1f))
         }
 
         Row(
@@ -93,7 +93,7 @@ fun DspTab(vm: BiAmpViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
         }
 
@@ -112,6 +112,7 @@ fun DspTab(vm: BiAmpViewModel) {
                 range = 200f..1000f,
                 steps = 15,
                 enabled = xoEnabled,
+                resetTo = Limits.FC_DEFAULT,
                 modifier = Modifier.weight(1f)
             ) { vm.setFc(it.roundToInt()) }
 
@@ -121,6 +122,7 @@ fun DspTab(vm: BiAmpViewModel) {
                 range = 20f..80f,
                 steps = 11,
                 enabled = subEnabled,
+                resetTo = Limits.HP_DEFAULT,
                 modifier = Modifier.weight(1f)
             ) { vm.setHp(it.roundToInt()) }
         }
@@ -140,7 +142,7 @@ fun DspTab(vm: BiAmpViewModel) {
         Caption(stringResource(R.string.band_caption))
         FilterGraph(vm, ds, enabled)
 
-HorizontalDivider()
+        HorizontalDivider()
 
         // ── 5. Раскладка выходов: L/R и дублирование 2,3 ──────────
         // Предупреждение о DUP обязано быть на экране: при DUP: 1 каналы
@@ -157,8 +159,8 @@ HorizontalDivider()
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it) }, enabled = enabled)
         }
         Row(
@@ -166,7 +168,7 @@ Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.body
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyLarge,
-                 modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f))
             Switch(checked = ds.dup, onCheckedChange = { vm.setDup(it) }, enabled = enabled)
         }
 
@@ -175,11 +177,14 @@ Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.body
 }
 
 /**
- * Ручка с подписью и текущим значением для горизонтальной линии.
+ * Ручка с подписью для горизонтальной линии.
  *
- * Подпись и число стоят под крутилкой, а не рядом: на две ручки в ряд ширины
+ * Подпись стоит под крутилкой, а не рядом: на две ручки в ряд ширины
  * не хватает, и подпись сбоку выдавила бы вторую ручку за край экрана.
- * Число набрано покрупнее подписи — на него смотрят, выставляя частоту.
+ * Текущее значение выводится в центре самой ручки — там, куда смотрит
+ * глаз во время поворота, — поэтому подпись держит только название.
+ * Двойной тап возвращает [resetTo], то есть заводское значение: руку
+ * увели с узкого места и обратно уже не угадаешь на слух.
  */
 @Composable
 private fun DialKnob(
@@ -189,6 +194,7 @@ private fun DialKnob(
     steps: Int,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    resetTo: Float,
     onFinished: (Float) -> Unit
 ) {
     val stateText = sliderStateText(value, steps, " Гц")
@@ -204,18 +210,15 @@ private fun DialKnob(
             steps = steps,
             diameter = 132.dp,
             label = label,
-            stateText = stateText
+            stateText = stateText,
+            valueText = stateText,
+            defaultValue = resetTo
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            stateText,
-            style = MaterialTheme.typography.titleLarge,
-            color = if (enabled) MaterialTheme.colorScheme.primary
+            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
             else MaterialTheme.colorScheme.outline
         )
     }

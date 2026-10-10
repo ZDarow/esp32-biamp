@@ -29,6 +29,36 @@ env:
   A2DP_COMMIT: 'b6da4744286ca15b6f1dee607c077a4747294dd4'
 
 jobs:
+  dsp-tests:
+    name: Тесты DSP (хост)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Копирование репозитория
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Прогон host-тестов DSP
+        run: |
+          # Биквад, кроссовер и линия задержки против теоретического отклика.
+          # Собираются обычным gcc без Arduino и ESP-IDF, поэтому регрессия в
+          # формуле DSP видна на PR, где железа и arduino-cli нет.
+          # -Wall включён: предупреждения компилятора здесь падают прогон.
+          set -euo pipefail
+          make -C firmware/tests test-host
+
+      - name: Компиляция с -Werror
+        run: |
+          # Makefile собирает с -Wall, но без -Werror: локально лишнее
+          # предупреждение не должно ронять проверку. В CI проверяем строже.
+          set -euo pipefail
+          make -C firmware/tests test-host-clean
+          for t in golden_biquad golden_crossover golden_delay; do
+            gcc -O2 -Wall -Wextra -Werror -o /dev/null "firmware/tests/$t.c" -lm
+          done
+
   firmware:
     name: Прошивка (arduino-cli)
     runs-on: ubuntu-latest

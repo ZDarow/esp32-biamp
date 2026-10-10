@@ -280,10 +280,15 @@ _PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
 )
 
 _DELAY_RE: Final[re.Pattern[str]] = _PATTERNS[-1][0]
+_VOLUME_RE: Final[re.Pattern[str]] = _PATTERNS[0][0]
 
 
 def is_block_end(line: str) -> bool:
     return _DELAY_RE.search(line) is not None
+
+
+def is_block_start(line: str) -> bool:
+    return _VOLUME_RE.search(line) is not None
 
 
 def _f(value: str, fallback: float) -> float:

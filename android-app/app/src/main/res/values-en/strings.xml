@@ -21,6 +21,18 @@
     <string name="conn_state_reconnecting">Reconnecting…</string>
     <string name="conn_state_off">Disconnected, tap to connect</string>
 
+    <!-- Connection overlay -->
+    <string name="conn_overlay_connect">Connecting to amplifier…</string>
+    <string name="conn_overlay_reconnect">Reconnecting…</string>
+    <string name="conn_overlay_cancel">Cancel</string>
+    <string name="conn_overlay_pick">Other device</string>
+
+    <!-- Manual amplifier address -->
+    <string name="mac_label">Amplifier address</string>
+    <string name="mac_hint">AA:BB:CC:DD:EE:FF</string>
+    <string name="mac_invalid">Six octets, e.g. 68:09:47:86:5C:38</string>
+    <string name="mac_connect">Connect by address</string>
+
     <!-- Device picker -->
     <string name="device_picker_title">Select device</string>
     <string name="device_picker_empty">No paired devices.\nPair the phone with ESP32 BiAmp Speaker in Bluetooth settings first.</string>
@@ -54,8 +66,14 @@
     <string name="service_title">Service</string>
     <string name="section_speaker_test">Speaker test</string>
     <string name="test_all">All</string>
+    <string name="test_left">Zone L</string>
+    <string name="test_right">Zone R</string>
     <string name="test_low">LF</string>
     <string name="test_high">HF</string>
+    <string name="test_ch1">ch 1</string>
+    <string name="test_ch2">ch 2</string>
+    <string name="test_ch3">ch 3</string>
+    <string name="test_ch4">ch 4</string>
     <string name="test_anti">Anti</string>
     <string name="test_sweep">Sweep</string>
     <string name="test_off">STOP</string>
@@ -123,5 +141,8 @@
     <string name="swap_switch">Swap L/R</string>
     <string name="dup_switch">Duplicate to 2, 3</string>
     <string name="dup_warning">DUP: 1 - channels 2 and 3 are physically silent. Restore</string>
+
+    <!-- Documentation sheet: hint under the title. -->
+    <string name="docs_sheet_hint">Drag the sheet down or tap the cross to close</string>
 
 </resources>

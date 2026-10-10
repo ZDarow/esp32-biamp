@@ -1,0 +1,7 @@
+# Бинарники host-тестов. На Windows make добавляет .exe, на Linux собирает
+# без расширения — оба варианта нужно скрывать, иначе локальный прогон
+# `make test-host` оставляет неотслеживаемые файлы.
+*.exe
+golden_biquad
+golden_crossover
+golden_delay
