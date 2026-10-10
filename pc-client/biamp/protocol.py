@@ -285,14 +285,23 @@ class DeviceState:
 
 _PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"V0=(\d+)%\s+V1=(\d+)%\s+bal=(-?[\d.]+)"), "volume"),
-    (re.compile(r"Fc=([\d.]+)Hz\s+hp=([\d.]+)Hz\s+sub=(?P<sub>" + _ON_OFF_RE + r")"), "crossover"),
-    (re.compile(r"XO:\s+(?P<xo_type>Butter|LR4)(?:\s+(?P<xo_on>" + _ON_OFF_RE + r"))?"), "xo"),
+    (
+        re.compile(r"Fc=([\d.]+)Hz\s+hp=([\d.]+)Hz\s+sub=(?P<sub>" + _ON_OFF_RE + r")", re.IGNORECASE),
+        "crossover",
+    ),
+    (re.compile(r"XO:\s+(?P<xo_type>Butter|LR4)(?:\s+(?P<xo_on>" + _ON_OFF_RE + r"))?", re.IGNORECASE), "xo"),
     (re.compile(r"TLF=(-?[\d.]+)dB\s+THF=(-?[\d.]+)dB"), "tilt"),
     (re.compile(r"EQ:\s*L=(-?[\d.]+)\s+M=(-?[\d.]+)\s+H=(-?[\d.]+)"), "eq"),
-    (re.compile(r"Mute:\s*(?P<m0>" + _BOOL_01_RE + r")/(?P<m1>" + _BOOL_01_RE + r")"), "mute"),
-    (re.compile(r"SWP:\s*(?P<swp>" + _BOOL_01_RE + r")"), "swap"),
-    (re.compile(r"DUP:\s*(?P<dup>" + _BOOL_01_RE + r")"), "dup"),
-    (re.compile(r"BT:\s+(?P<bt>" + _ON_OFF_RE + r")(?:\s*\|\s*SPP:\s+(?P<spp>" + _ON_OFF_RE + r"))?"), "bt"),
+    (re.compile(r"Mute:\s*(?P<m0>" + _BOOL_01_RE + r")/(?P<m1>" + _BOOL_01_RE + r")", re.IGNORECASE), "mute"),
+    (re.compile(r"SWP:\s*(?P<swp>" + _BOOL_01_RE + r")", re.IGNORECASE), "swap"),
+    (re.compile(r"DUP:\s*(?P<dup>" + _BOOL_01_RE + r")", re.IGNORECASE), "dup"),
+    (
+        re.compile(
+            r"BT:\s+(?P<bt>" + _ON_OFF_RE + r")(?:\s*\|\s*SPP:\s+(?P<spp>" + _ON_OFF_RE + r"))?",
+            re.IGNORECASE,
+        ),
+        "bt",
+    ),
     (re.compile(r"Test:\s+(\d+)(?:\s+TVol=(\d+)%)?"), "test"),
     (re.compile(r"Src:\s+([\d.]+)\s*kHz"), "src"),
     (
@@ -359,14 +368,14 @@ def parse_status(
                     state,
                     crossover_hz=_f(groups[0], state.crossover_hz),
                     sub_hp_hz=_f(groups[1], state.sub_hp_hz),
-                    sub_on=groups[2] == _BoolWord.ON.value,
+                    sub_on=groups[2].lower() == _BoolWord.ON.value,
                 )
             elif kind == "xo":
                 xo_on_value = groups[1] if len(groups) > 1 and groups[1] is not None else _BoolWord.ON.value
                 state = _replace(
                     state,
                     crossover_type=2 if groups[0] == "LR4" else 1,
-                    xo_on=xo_on_value == _BoolWord.ON.value,
+                    xo_on=xo_on_value.lower() == _BoolWord.ON.value,
                 )
             elif kind == "tilt":
                 state = _replace(
@@ -394,8 +403,8 @@ def parse_status(
             elif kind == "bt":
                 state = _replace(
                     state,
-                    bt_audio_on=groups[0] == _BoolWord.ON.value,
-                    spp_on=len(groups) > 1 and groups[1] == _BoolWord.ON.value,
+                    bt_audio_on=groups[0].lower() == _BoolWord.ON.value,
+                    spp_on=len(groups) > 1 and groups[1].lower() == _BoolWord.ON.value,
                 )
             elif kind == "test":
                 state = _replace(

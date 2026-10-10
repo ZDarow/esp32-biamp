@@ -161,10 +161,7 @@ class SerialTransport(LineTransport):
             ) from exc
         try:
             return serial.Serial(
-                self._port_name,
-                self._baud,
-                timeout=self._timeout,
-                write_timeout=self._reconnect_timeout,
+                self._port_name, self._baud, timeout=self._timeout, write_timeout=self._reconnect_timeout
             )
         except Exception as exc:
             raise TransportError(f"не удалось открыть {self._port_name} @ {self._baud}: {exc}") from exc
