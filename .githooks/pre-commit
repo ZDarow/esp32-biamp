@@ -131,9 +131,15 @@ if [ -n "$blocked" ]; then
 			fi
 		fi
 		if [ -d pc-client ] && command -v mypy >/dev/null 2>&1; then
-			if ! mypy pc-client >/dev/null 2>&1; then
+			# Запуск из pc-client/, а не из корня: там лежит pyproject.toml, в
+			# котором files = ["biamp"] (только пакет, без тестов) и
+			# --ignore-missing-imports для serial. Без конфига mypy проверяет
+			# всё дерево и ругается на отсутствие stub-пакетов — ошибка,
+			# которую CI не видит, потому что CI запускает `mypy` из той же
+			# директории.
+			if ! (cd pc-client && mypy) >/dev/null 2>&1; then
 				echo "Отказ: mypy нашёл ошибки типов в pc-client:"
-				mypy pc-client 2>&1 | head -20
+				(cd pc-client && mypy) 2>&1 | head -20
 				exit 1
 			fi
 		fi
