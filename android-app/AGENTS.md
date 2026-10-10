@@ -4,7 +4,11 @@
 
 ## Среда (Windows + VSCode, без Android Studio)
 - **JDK 17** (Temurin). AGP 8.x требует именно 17.
-- **AGP 8.7.3**, **Kotlin 2.0.21**, **Gradle 8.9** (версии — в `build.gradle.kts` и `gradle/wrapper/gradle-wrapper.properties`).
+- **AGP 8.7.3**, **Kotlin 2.0.21**, **Gradle 8.11.1** (версии — в `build.gradle.kts` и `gradle/wrapper/gradle-wrapper.properties`).
+- **Compose BOM 2025.09.00** приносит **Material3 1.3.2**, не 1.4.0. Материал 1.4.0
+  лежит в BOM 2026.09.00, но требует смены AGP и Kotlin: lint из AGP 8.7.3 разобран
+  против Kotlin Analysis API K1 и роняет сбор на K2. Список падающих детекторов —
+  `K2_CRASHING_LINT_IDS` в `app/build.gradle.kts`.
 - Android SDK: только `cmdline-tools`. Путь: `C:\Android\Sdk\cmdline-tools\latest\bin` — внутренняя папка `latest` **обязательна**.
 - Установка пакетов: `.\sdkmanager.bat "platform-tools" "platforms;android-35" "build-tools;35.0.0"`.
 - `ANDROID_HOME=C:\Android\Sdk`, в `PATH` добавить `%ANDROID_HOME%\platform-tools`.
@@ -31,7 +35,7 @@ CommandSender (очередь + троттлинг) → SppManager (RFCOMM)
 - `ConnState`: `DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`.
 - Сокет — только на `Dispatchers.IO`.
 
-## Протокол (источник истины — прошивка `firmware/ESP32_BiAmp/ESP32_BiAmp.ino`, версия v34)
+## Протокол (источник истины — прошивка `firmware/ESP32_BiAmp/ESP32_BiAmp.ino`, версия v35)
 - SPP/RFCOMM, UUID `00001101-0000-1000-8000-00805F9B34FB`, устройство `ESP32 BiAmp Speaker`.
 - Команды — строки нижнего регистра, терминатор `\n` (принимает и `\r`), макс. 63 символа + терминатор.
 - Большинство команд без ответа. С ответом: `status`, `stats`, `heap`, `help`, `evlog` (только USB), `save`, `reboot`, `factory`, `preset:N`, `test:*`, `tvol:N`.

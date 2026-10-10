@@ -134,6 +134,12 @@ python -m unittest discover -s tests -t .
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\check-owners.ps1
 ```
 
+На Linux без PowerShell:
+
+```bash
+python3 tools/check-owners.py
+```
+
 Скомпилированный APK обязан работать на устройстве: подключиться
 к устройству, прочитать `status`, изменить параметр и увидеть
 отклик.
