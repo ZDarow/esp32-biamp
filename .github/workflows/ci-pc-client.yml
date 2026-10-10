@@ -31,6 +31,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
+          # fetch-depth: 1 — без истории. Раньше стояло значение по умолчанию
+          # (полный клон), и при force-push'е ветки runner не обновлял локальную
+          # копию: оставался транспорт v34 с длинными строками, а ruff падал на
+          # нём, хотя blob в репозитории был чистым. Без истории force-push
+          # не оставляет мусора, и каждый прогон берёт точную версию коммита.
+          fetch-depth: 1
 
       - name: Установка Python 3.12
         uses: actions/setup-python@v5
