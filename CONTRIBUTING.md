@@ -449,3 +449,28 @@ ring_buf. РџСЂРё RING_FRAMES=4096 Рё SELFTEST_CHUNK=896 Р·Р°РїРёСЃСЊ
 Р’РЅРѕСЃСЏ РёР·РјРµРЅРµРЅРёСЏ, РІС‹ СЃРѕРіР»Р°С€Р°РµС‚РµСЃСЊ СЃ С‚РµРј, С‡С‚Рѕ РѕРЅРё РїСѓР±Р»РёРєСѓСЋС‚СЃСЏ
 РїРѕРґ [GPL-3.0-or-later](LICENSE). Р’РєР»Р°Рґ СЃС‡РёС‚Р°РµС‚СЃСЏ В«Your WorkВ»
 СЃРѕ СЃС‚РѕСЂРѕРЅС‹ РІРєР»Р°РґР°, РїРµСЂРµРґР°РІР°РµРјРѕРіРѕ РїРѕРґ С‚РѕР№ Р¶Рµ Р»РёС†РµРЅР·РёРµР№.
+
+## Работа без ESP32 (LoopbackTransport)
+
+Для разработки pc-client и тестирования парсера/веб-интерфейса можно работать без подключенного ESP32. LoopbackTransport в pc-client/tests/test_webapp.py эмулирует прошивку v35 и позволяет проверять логику без железа.
+
+### Запуск всех юнит-тестов без железа
+
+`powershell
+cd pc-client
+python -m pytest tests/ -v
+`
+
+Все 86 тестов проходят на LoopbackTransport без ESP32/SPP/COM-порта.
+
+### Быстрая проверка парсера
+
+`python
+from biamp import protocol as p
+# Используйте SAMPLE из tests/test_webapp.py
+state = p.parse_status(open(" pc-client/tests/test_webapp.py\).read().splitlines()) # упрощённо
+`
+
+### Динамический режим LoopbackTransport
+
+LoopbackTransport может эмулировать обновление состояния после отправки команд. Это удобно для отладки ead_status и command_for без реального устройства.
