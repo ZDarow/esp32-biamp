@@ -17,6 +17,10 @@
 gradlew     text eol=lf
 gradlew.bat text eol=crlf
 
+# Python
+*.py        text eol=lf
+*.toml      text eol=lf
+
 # Двоичные файлы, которые обязаны храниться как есть
 *.jar       binary
 *.bin       binary

@@ -88,25 +88,88 @@ for f in $(git diff --cached --name-only); do
 done
 
 if [ -n "$blocked" ]; then
-	echo "Отказ: ветка $branch принадлежит направлению «$(own_label "$owner")»,"
-	echo "а в коммите есть файлы других направлений."
-	echo ""
-	echo "Чужие файлы:"
-	for f in $blocked; do
-		echo "  $f  ->  $(own_label "$(path_owner "$f")")"
-	done
-	echo ""
-	echo "Как поступить:"
-	echo "  1. Убрать чужие файлы из индекса:  git restore --staged <файл>"
-	echo "  2. Создать отдельную ветку от main под эти файлы и смержить её."
-	echo "  3. Если правка всё же нужна здесь — описание в docs/BRANCHING.md,"
-	echo "     обход: git commit --no-verify"
-	echo ""
-	echo "Матрица владения: docs/BRANCHING.md, .github/CODEOWNERS"
-	exit 1
-fi
+		echo "Отказ: ветка $branch принадлежит направлению «$(own_label "$owner")»,"
+		echo "а в коммите есть файлы других направлений."
+		echo ""
+		echo "Чужие файлы:"
+		for f in $blocked; do
+			echo "  $f  ->  $(own_label "$(path_owner "$f")")"
+		done
+		echo ""
+		echo "Как поступить:"
+		echo "  1. Убрать чужие файлы из индекса:  git restore --staged <файл>"
+		echo "  2. Создать отдельную ветку от main под эти файлы и смержить её."
+		echo "  3. Если правка всё же нужна здесь — описание в docs/BRANCHING.md,"
+		echo "     обход: git commit --no-verify"
+		echo ""
+		echo "Матрица владения: docs/BRANCHING.md, .github/CODEOWNERS"
+		exit 1
+	fi
 
-if [ -n "$shared_touched" ]; then
+	# ── Проверка 2: код не должен собираться с мусором ──────────────────
+	# Кэши, отчёты, бинарники — всё это не должно попадать в историю.
+	# .gitignore это отсекает при добавлении, но проверка не мешает.
+	for f in $(git diff --cached --name-only); do
+		case "$f" in
+			*.pyc|__pycache__/*|.mypy_cache/*|.ruff_cache/*|.pytest_cache/*\
+			|.gradle/*|.kotlin/*|*/build/*|*.apk|*.aab|*.bin|*.elf|*.hex|*.map\
+			|output-metadata.json|*.pcap|*.pcapng|*.log|*.p12|*.jks|*.keystore\
+			|.env|.env.*|local.properties|*.tmp|*.bak|*.orig|*.rej)
+				echo "Отказ: в коммит попадает служебный файл: $f"
+				echo "Уберите его из индекса: git restore --staged $f"
+				exit 1 ;;
+		esac
+	done
+
+	# ── Проверка 3: локальный линтер (только если инструменты доступны) ──
+	# Быстро (секунды), не блокирует разработку при отсутствии toolchain.
+	if [ "${SKIP_LINT:-0}" = "0" ]; then
+		if [ -d pc-client ] && command -v ruff >/dev/null 2>&1; then
+			if ! ruff check pc-client >/dev/null 2>&1; then
+				echo "Отказ: ruff нашёл нарушения в pc-client:"
+				ruff check pc-client 2>&1 | head -20
+				exit 1
+			fi
+		fi
+		if [ -d pc-client ] && command -v mypy >/dev/null 2>&1; then
+			# Запуск из pc-client/, а не из корня: там лежит pyproject.toml, в
+			# котором files = ["biamp"] (только пакет, без тестов) и
+			# --ignore-missing-imports для serial. Без конфига mypy проверяет
+			# всё дерево и ругается на отсутствие stub-пакетов — ошибка,
+			# которую CI не видит, потому что CI запускает `mypy` из той же
+			# директории.
+			if ! (cd pc-client && mypy) >/dev/null 2>&1; then
+				echo "Отказ: mypy нашёл ошибки типов в pc-client:"
+				(cd pc-client && mypy) 2>&1 | head -20
+				exit 1
+			fi
+		fi
+		# ── Проверка 4: в Kotlin не должно быть hardcoded strings ──────────
+		# Имена строк идентифицируются по R.string.<name>; без него —
+		# мусор в интерфейсе, который не локализуется (см. AGENTS.md).
+		if [ -d android-app/app/src/main/java ]; then
+			hardcoded=$(grep -rn '"[А-Яа-я][^"]*"' \
+				android-app/app/src/main/java/com/kilo/biampcontrol/ui/ \
+				2>/dev/null | grep -v 'R\.string\|@[A-Z]\|\"\\\\n\|\"\\\\t\|\"\\\\%' \
+				| grep -v '//' | head -10)
+			if [ -n "$hardcoded" ]; then
+				echo "Замечание: в Kotlin обнаружены hardcoded строки (возможно, не локализованные):"
+				echo "$hardcoded"
+			fi
+		fi
+		# ── Проверка 5: команда в коде есть в прошивке ─────────────────────
+		# Команда, которой нет в ESP32_BiAmp.ino, будет молча проигнорирована.
+		if [ -f firmware/ESP32_BiAmp/ESP32_BiAmp.ino ]; then
+			for cmd in $(grep -oh '"[a-z]*:' android-app/app/src/main/java/com/kilo/biampcontrol/bt/Protocol.kt 2>/dev/null | tr -d '"'); do
+				cmd_name="${cmd%:}"
+				if ! grep -q "\"$cmd_name:" firmware/ESP32_BiAmp/ESP32_BiAmp.ino 2>/dev/null; then
+					echo "Замечание: команда '$cmd_name:' в Protocol.kt, но отсутствует в прошивке — будет проигнорирована."
+				fi
+			done
+		fi
+	fi
+
+	if [ -n "$shared_touched" ]; then
 	echo "Замечание: вместе со своими файлами изменены общие."
 	echo "Общие файлы — источник конфликтов при слиянии, проверьте правку:"
 	for f in $shared_touched; do
