@@ -13,6 +13,7 @@
 
 - [С чего начать](#с-чего-начать)
 - [Окружение](#окружение)
+- [Работа без ESP32](#работа-без-esp32)
 - [Проверка перед коммитом](#проверка-перед-коммитом)
 - [Параллельная работа](#параллельная-работа)
   - [Стратегия ветвления](#стратегия-ветвления)
@@ -48,8 +49,12 @@
 
 | Компонент | Версия |
 |---|---|
-| [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | свежая |
-| ESP32 core | `esp32:esp32` 3.x |
+| [arduino-cli](https://arduino.github.io/arduino-cli/latest/installation/) | 1.5.1 (хеш 28a8e119…dd2b) |
+| ESP32 core | `esp32:esp32` 3.3.12 |
+| ESP32-A2DP | v1.8.11, коммит `b6da4744…dd4` (только GitHub) |
+| arduino-audio-tools | v1.2.5, коммит `2390c44f…53b9` (только GitHub) |
+| Adafruit GFX Library | 1.12.6 (реестр) |
+| Adafruit SSD1306 | 2.5.17 (реестр) |
 | PowerShell | 5.1 или новее (`powershell` или `pwsh`) |
 
 ```bash
@@ -58,11 +63,17 @@ arduino-cli core install esp32:esp32
 arduino-cli lib install "Adafruit GFX Library" "Adafruit SSD1306"
 
 # audio-tools и ESP32-A2DP отсутствуют в реестре Arduino —
-# публикуются только на GitHub, поэтому ставятся вручную:
-git clone --depth 1 https://github.com/pschatzmann/arduino-audio-tools.git \
+# публикуются только на GitHub, поэтому ставятся вручную.
+# Клонируйте по тегу и сверяйте хеш коммита: тег в репозитории можно
+# переставить, а хеш — нет. Без фиксации сборка падает на чужом релизе.
+git clone --depth 1 --branch v1.2.5 https://github.com/pschatzmann/arduino-audio-tools.git \
   "$(arduino-cli config get directories.user)/libraries/audio-tools"
-git clone --depth 1 https://github.com/pschatzmann/ESP32-A2DP.git \
+git -C "$(arduino-cli config get directories.user)/libraries/audio-tools" rev-parse HEAD
+# → 2390c44fac3bdd1df40b80a088f00c9a203053b9
+git clone --depth 1 --branch v1.8.11 https://github.com/pschatzmann/ESP32-A2DP.git \
   "$(arduino-cli config get directories.user)/libraries/ESP32-A2DP"
+git -C "$(arduino-cli config get directories.user)/libraries/ESP32-A2DP" rev-parse HEAD
+# → b6da4744286ca15b6f1dee607c077a4747294dd4
 ```
 
 ### Приложение
@@ -99,7 +110,73 @@ cd pc-client
 
 ---
 
-## Проверка перед коммитом
+## Работа без ESP32
+
+**Вам не нужен усилитель, COM-порт или Bluetooth, чтобы проверить
+парсер протокола, веб-интерфейс и CLI-клиент.** В `pc-client` есть
+эмулятор прошивки — `LoopbackTransport` — который отдаёт захардкоженный
+статус v35 и отслеживает отправляемые команды.
+
+### 1. Запуск всех юнит-тестов
+
+```powershell
+cd pc-client
+.\setup.ps1
+python -m unittest discover -s tests -t . -v
+```
+
+Все 86 тестов работают на `LoopbackTransport`. Никакого ESP32,
+SPP или COM-порта не требуется.
+
+### 2. Проверка парсера отдельно
+
+```python
+from biamp import protocol as p
+from tests.test_webapp import SAMPLE
+
+state = p.parse_status(SAMPLE.splitlines())
+print(state)           # DeviceState с 13 полями контракта
+print(state.to_dict()) # roundtrip в JSON-совместимый словарь
+```
+
+### 3. Проверка веб-интерфейса отдельно
+
+```python
+from biamp.client import BiAmpClient
+from biamp.transport import LoopbackTransport
+from biamp.webapp import create_server, apply_field
+
+client = BiAmpClient(LoopbackTransport({"status": SAMPLE}))
+server = create_server(client, "127.0.0.1", 0)
+# GET http://127.0.0.1:<port>/api/state
+```
+
+### 4. Динамический ответ: эмуляция «живого» устройства
+
+`LoopbackTransport` умеет отвечать на конкретные команды и менять
+ответ вручную:
+
+```python
+transport = LoopbackTransport({"status": SAMPLE})
+transport.write(b"vol:50\n")     # команда запишется в transport.sent
+transport.emit("V0=50% V1=38% bal=1.50\r\n")  # новое состояние
+state = client.read_status()     # увидит V0=50%
+```
+
+Так можно отладить `read_status` и `command_for` в динамике — без
+подключённого ESP32.
+
+### Что покрывают тесты
+
+| Файл | Что проверяет |
+|---|---|
+| `tests/test_contract.py` | 13 полей контракта: ни одно не теряется при roundtrip, `inv:` не приходит из клиента |
+| `tests/test_protocol.py` | буфер команд, валидация диапазонов, биквады, `to_bool` |
+| `tests/test_client.py` | `read_status`, обработка блоков, асин notices |
+| `tests/test_webapp.py` | веб-API: CSRF, DNS Rebinding, whitelist, Content-Length |
+| `tests/test_cli.py` | CLI: профили, `set`, `status`, валидация порта |
+
+---
 
 Оба компонента обязаны собираться. CI делает то же самое, но
 локальная проверка быстрее и экономит время на pull request.
