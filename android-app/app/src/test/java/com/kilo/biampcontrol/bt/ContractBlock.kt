@@ -1,17 +1,17 @@
 /*
  * Загрузчик контракта: читает блок `status` из
- * firmware/protocol/status-contract.md, раздел 2.
+ * protocol/status-contract.md, раздел 2.
  *
  * Зачем файл отдельно от теста. Блок контракта раньше хранился цитатой в
  * самом StatusContractTest. Цитата была дословной, но проверка этого не
  * утверждала: правка контракта оставляла тест зелёным, и Android-парсер
- * разъезжался с прошивкой молча — ровно тот класс дефекта, ради которого
+ * разъезжался с прошивкой молча — ровно тот класс дефекта, ра�ади которого
  * контрактный тест и написан. Клиент для ПК читает файл напрямую; теперь так
  * же делает Android.
  *
- * Файл принадлежит направлению прошивки, поэтому на ветке android-dev до
- * слияния с main его может не быть. Тогда тесты пропускаются (см.
- * [contractBlockOrSkip]), а не падают на чужом отсутствующем файле.
+ * Файл принадлежит направлению integrator (общий файл в protocol/), поэтому
+ * он есть на всех ветках — в т.ч. на android-dev. Проверка блока status
+ * работает как обычно.
  */
 
 package com.kilo.biampcontrol.bt
@@ -20,7 +20,7 @@ import org.junit.Assume.assumeTrue
 import java.io.File
 
 /** Путь контракта относительно корня репозитория. */
-private const val CONTRACT_RELATIVE = "firmware/protocol/status-contract.md"
+private const val CONTRACT_RELATIVE = "protocol/status-contract.md"
 
 /** Заголовок раздела 2 — «## 2.». */
 private const val SECTION_2 = "## 2."
@@ -63,7 +63,7 @@ fun findContractFile(): File? {
 fun contractBlockOrSkip(): List<String> {
     val file = findContractFile()
     assumeTrue(
-        "нет файла контракта $CONTRACT_RELATIVE — он в ветке направления firmware",
+        "нет файла контракта $CONTRACT_RELATIVE — он в protocol/ на корне репо",
         file != null,
     )
     val text = file!!.readText(Charsets.UTF_8)

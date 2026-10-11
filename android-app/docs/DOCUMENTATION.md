@@ -445,7 +445,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 | Группа | Функции | Команды |
 |---|---|---|
 | Громкость | `setVolBoth`, `setVol0`, `setVol1`, `setBal`, `toggleMute` | `vol:`, `v0:`, `v1:`, `bal:`, `mute:` |
-| DSP | `setFc`, `setHp`, `setSub`, `setTlf`, `setThf`, `setEq`, `toggleInv`, `invOff`, `preset` | `fc:`, `hp:`, `sub:`, `tlf:`, `thf:`, `eql:`…`eqh:`, `inv:`, `preset:` |
+| DSP | `setFc`, `setHp`, `setSub`, `setTlf`, `setThf`, `setEq`, `setSwap`, `setDup`, `preset` | `fc:`, `hp:`, `sub:`, `tlf:`, `thf:`, `eql:`…`eqh:`, `swap:`, `dup:`, `preset:` |
 | Кроссовер и каналы | `setXoType`, `setDelay`, `setChHp`, `setChLp` | `xotype:`, `delayC:`, `chhp:C:F`, `chlp:C:F` |
 | Транспорт и сервис | `transport`, `startTest`, `setTf`, `setTestVol`, `saveParams`, `reboot`, `factoryReset` | `play`…`prev`, `test:`, `tf:`, `tvol:`, `save`, `reboot`, `factory` |
 | Диагностика | `sendDiagnostic(cmd)` | произвольная команда с ответом |
@@ -556,11 +556,13 @@ private fun onLine(line: String) {
 | `xoType` | `Int` | `XO: Butter` / `XO: LR4` |
 | `tlf`, `thf` | `Float` | `TLF=0dB THF=-1dB` |
 | `eql`, `eqm`, `eqh` | `Float` | `EQ: L= M= H=` |
-| `inv` | `List<Boolean>` | `INV: 0100` |
+| `swapped` | `Boolean` | `SWP: 0` — перестановка Л/П (вместо инверсии фазы) |
+| `dup` | `Boolean` | `DUP: 0` — дублирование выходов |
+| `muted` | `List<Boolean>` | `Mute: 0/0` — мьют зон 0 и 1 |
 | `btAudioOn`, `sppOn` | `Boolean` | `BT: ON | SPP: ON` |
 | `srcKhz` | `String` | `Src: 44.1 kHz` |
-| `testMode` | `Int` | `Test: 0` |
-| `testVol` | `Int` | `TVol=6%` |
+| `testMode` | `Int` | `Test: 0` — режим тест-сигнала, 0..11 |
+| `testVol` | `Int` | `TVol=6%` — громкость теста, 0..6 % |
 | `delays` | `List<Int>` | `Delay: 0/0/0/0` |
 | `chFilters` | `List<Pair<Int, Int>>` | `CHF: 0/0 0/0 0/0 0/0` |
 
@@ -681,7 +683,9 @@ private fun onLine(line: String) {
 | `chhp` | 0–20000 Гц | ВЧ-фильтр канала | `setChHp` | да |
 | `chlp` | 0–20000 Гц | НЧ-фильтр канала | `setChLp` | да |
 | `delay` | 0–220 | задержка канала, сэмплы | `setDelay` | да |
-| `tvol` | 0–100 | громкость теста, % | `setTestVol` | да |
+| `tvol` | 0–6 % | громкость теста | `setTestVol` | да |
+| `swap` | 0/1 | перестановка Л/П | `setSwap` | нет |
+| `dup` | 0/1 | дублирование выходов | `setDup` | нет |
 | `preset` | 0–3 | Flat / Voice / Night / Party | `preset` | нет |
 | `test` | см. ниже | режим тест-сигнала | `startTest` | нет |
 | `tf` | 20–20000 Гц | частота теста | `setTf` | да |
@@ -703,35 +707,40 @@ private fun onLine(line: String) {
 
 ### 4.4 Формат ответа status
 
-Прошивка отвечает на `status` одиннадцатью строками в фиксированном порядке:
+Прошивка отвечает на `status` тринадцатью строками в фиксированном порядке
+(контракт v35.1, `protocol/status-contract.md`, раздел 2):
 
 ```
-V0=15% V1=15% bal=0
+V0=40% V1=40% bal=0.00
 Fc=400Hz hp=45Hz sub=ON
-XO: Butter
-TLF=0dB THF=-1dB
+XO: Butter ON
+TLF=0.00dB THF=-1.00dB
 EQ: L=0.00 M=0.00 H=0.00
-INV: 0000
-BT: ON | SPP: ON
+Mute: 0/0
+SWP: 0
+DUP: 0
+BT: ON | SPP: OFF
 Src: 44.1 kHz
-Test: 0 TVol=6%
+Test: 0 TVol=4%
 CHF: 0/0 0/0 0/0 0/0
 Delay: 0/0/0/0
 ```
 
 | № | Строка | Формат | Примечание |
 |---|---|---|---|
-| 1 | Громкость | `V0=N% V1=N% bal=X` | целые проценты, баланс с точкой |
+| 1 | Громкость | `V0=N% V1=N% bal=X` | целые проценты, баланс с двумя знаками |
 | 2 | Кроссовер | `Fc=NHz hp=NHz sub=ON\|OFF` | целые Гц |
-| 3 | Тип кроссовера | `XO: Butter` \| `XO: LR4` | |
-| 4 | Тримы | `TLF=XdB THF=XdB` | 6 знаков после точки |
+| 3 | Тип кроссовера | `XO: Butter` \| `XO: LR4` | хвост ` ON`/` OFF` обязателен и значим |
+| 4 | Тримы | `TLF=XdB THF=XdB` | 2 знака после точки, -6..3 |
 | 5 | Эквалайзер | `EQ: L=X M=X H=X` | 2 знака после точки |
-| 6 | Инверсия | `INV: 0100` | 4 символа, порядок каналов 0…3 |
-| 7 | Связь | `BT: ON \| SPP: ON` | разделитель — вертикальная черта |
-| 8 | Источник | `Src: 44.1 kHz` \| `Src: 48 kHz` | частота из переговоров A2DP |
-| 9 | Тест | `Test: N TVol=N%` | режим и громкость тест-сигнала |
-| 10 | Фильтры каналов | `CHF: h/l h/l h/l h/l` | 0 означает «фильтр выключен» |
-| 11 | Задержки | `Delay: n/n/n/n` | сэмплы, 0…220 |
+| 6 | Мьют | `Mute: z0/z1` | каждое — `0` или `1`; **НОВОЕ в v35.1** |
+| 7 | Перестановка Л/П | `SWP: N` | `0`/`1`; новое в v35, заменяет инверсию фазы |
+| 8 | Дублирование | `DUP: N` | `0` или `1`; печатается всегда |
+| 9 | Связь | `BT: ON\|OFF \| SPP: ON\|OFF` | разделитель — вертикальная черта |
+| 10 | Источник | `Src: 44.1 kHz` \| `Src: 48 kHz` | частота из переговоров A2DP |
+| 11 | Тест | `Test: N TVol=N%` | режим 0..11 и громкость тест-сигнала 0..6 % |
+| 12 | Фильтры каналов | `CHF: h/l h/l h/l h/l` | 4 пары `HP/LP` для каналов 0…3, 0 — «выключено» |
+| 13 | Задержки | `Delay: n/n/n/n` | сэмплы, 0..220; **строка замыкает блок** |
 
 Прошивка печатает все ответы одновременно в USB и в SPP через функцию `say()`, поэтому
 одновременный мониторинг по COM-порту и по Bluetooth показывает одинаковый вывод.
@@ -907,9 +916,9 @@ vm.setVolBoth(40, force = true)
 // Развёртка: 3.4 мс на канале 1 (ВЧ-Л)
 vm.setDelay(1, 150)
 
-// Включение LR4 и сброс инверсий
+// Включение LR4 и перестановка Л/П
 vm.setXoType(2)
-vm.invOff()
+vm.setSwap(false)
 
 // Диагностика: ответ придёт в vm.log
 vm.sendDiagnostic("stats")
@@ -1123,7 +1132,8 @@ DSP считает коэффициенты фильтров в отдельно
 | Эквалайзер | `eql:`, `eqm:`, `eqh:` | «DSP» → Эквалайзер |
 | Задержки | `delay0:`…`delay3:` | «DSP» → Задержка каналов |
 | Поканальные фильтры | `chhp:`, `chlp:` | «DSP» → Поканальные фильтры |
-| Инверсия фазы | `inv:0`…`inv:3`, `inv:off` | «DSP» → Инверсия фазы |
+| Перестановка Л/П | `swap:` | «DSP» → Перестановка Л/П |
+| Дублирование | `dup:` | «DSP» → Дублирование выходов |
 | Транспорт | `play`, `pause`, `next`, `prev` | «Громкость» → Транспорт |
 | Пресеты | `preset:0`…`preset:3` | «Громкость» → Пресеты |
 | Тесты | `test:*`, `tf:`, `tvol:` | «Сервис» → Тест динамиков |

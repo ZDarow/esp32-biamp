@@ -7,7 +7,7 @@
  * строка `XO:` до v30 не содержала хвоста ` ON`/` OFF`, а строк Mute/SWP/DUP
  * в ней не было вовсе.
  *
- * Дословный блок из firmware/protocol/status-contract.md проверяет отдельный
+ * Дословный блок из protocol/status-contract.md проверяет отдельный
  * контрактный тест StatusContractTest.
  */
 
@@ -265,7 +265,7 @@ assertEquals(listOf(false, true), s.muted)
                 "Fc=50Hz hp=800Hz sub=ON",
                 "TLF=9.00dB THF=-40.00dB",
                 "EQ: L=30.00 M=-30.00 H=12.00",
-                "Test: 9 TVol=100%",
+                "Test: 12 TVol=100%",
                 "CHF: 5/40000 0/0 0/0 0/0",
                 "Delay: 999/0/0/0"
             )
@@ -279,7 +279,7 @@ assertEquals(listOf(false, true), s.muted)
         assertEquals(-6f, s.thf, 1e-4f)
         assertEquals(12f, s.eql, 1e-4f)
         assertEquals(-12f, s.eqm, 1e-4f)
-        assertEquals(4, s.testMode)
+        assertEquals(11, s.testMode)
         assertEquals(6, s.testVol)
         assertEquals(20 to 20000, s.chFilters[0])
         assertEquals(listOf(220, 0, 0, 0), s.delays)

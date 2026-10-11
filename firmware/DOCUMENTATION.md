@@ -1,6 +1,6 @@
 # ESP32 BiAmp — техническая документация
 
-**Версия прошивки:** v35 · **Платформа:** ESP32-WROOM-32 (Arduino core 3.3.12) · **Лицензия:** GPLv3
+**Версия прошивки:** v35.1 · **Платформа:** ESP32-WROOM-32 (Arduino core 3.3.12) · **Лицензия:** GPLv3
 
 Документация описывает Bluetooth A2DP-приёмник с активным двухполосным кроссовером, четырёхканальным
 DSP и двухзонным усилением. Аудиопоток проходит через выделенную FreeRTOS-задачу, изолированную от
@@ -320,10 +320,20 @@ $cli core update-index
 $cli core install esp32:esp32            # проверено на 3.3.12
 
 # Зависимости
-$cli lib install "ESP32-A2DP"            # 1.8.11 — приёмник A2DP, I2S-драйвер
-$cli lib install "audio-tools"           # 1.2.5  — I2SStream, используемый как бэкенд
+# ESP32-A2DP и audio-tools отсутствуют в официальном реестре Arduino —
+# их можно установить только с GitHub. Клонируйте по тегу и сверяйте
+# хеш коммита: тег в репозитории можно переставить, а хеш — нет.
+# Значения соответствуют рабочей сборке v35 и фиксируются в CI.
 $cli lib install "Adafruit_SSD1306"      # 2.5.17
 $cli lib install "Adafruit_GFX_Library"  # 1.12.6
+git clone --depth 1 --branch v1.8.11 https://github.com/pschatzmann/ESP32-A2DP.git \
+  "$($cli config get directories.user)/libraries/ESP32-A2DP"
+git -C "$($cli config get directories.user)/libraries/ESP32-A2DP" rev-parse HEAD
+# → b6da4744286ca15b6f1dee607c077a4747294dd4
+git clone --depth 1 --branch v1.2.5 https://github.com/pschatzmann/arduino-audio-tools.git \
+  "$($cli config get directories.user)/libraries/audio-tools"
+git -C "$($cli config get directories.user)/libraries/audio-tools" rev-parse HEAD
+# → 2390c44fac3bdd1df40b80a088f00c9a203053b9
 
 # Проверка
 $cli lib list | Select-String "ESP32-A2DP|audio-tools|Adafruit"
@@ -1253,11 +1263,10 @@ firmware/
 ├── ESP32_BiAmp/
 │   └── ESP32_BiAmp.ino    # Весь скетч, единственный исходный файл прошивки
 ├── DOCUMENTATION.md        # Настоящий документ
-├── protocol/
-│   └── status-contract.md  # Контракт строки status — общий для трёх реализаций
 ├── capture/                # Сниффер цифрового выхода Master, отдельная прошивка ESP-IDF
 │   ├── AUDIT.md            # Аудит цифрового тракта: методика, результаты, ограничения
 │   ├── README.md           # Протокол сниффера и формат файла захвата
+│   ├── TESTING.md          # Руководство по тестированию аудиопотока сниффером
 │   ├── sdkconfig.defaults  # Параметры сборки; sdkconfig создаётся из них
 │   └── main/               # Исходники сниффера (ESP-IDF, не Arduino)
 ├── tests/                  # Host-тесты DSP: обычный gcc, без Arduino и ESP-IDF

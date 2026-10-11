@@ -33,7 +33,7 @@ Master (ESP32 WROOM-32)            ESP32-S3-DevKitC-1 (сниффер)          
 I²S0 (зона Z1)  ────────────────▶  CAP_Z1_*  ──┐
 I²S1 (зона Z2)  ────────────────▶  CAP_Z2_*  ──┤  4 канала × 16 бит
                                                 │  = 8 байт/кадр
-                                                └─▶ нативный USB (COM12) ─▶ capture-analyze.py
+                                                 └─▶ нативный USB (COM13) ─▶ capture-analyze.py
 GND  ───────────────────────────▶  GND
 ```
 
@@ -77,7 +77,7 @@ GND  ─────────────────────────
 | Порт | Назначение |
 |---|---|
 | COM8 | Master, USB-CDC 115200 (команды, `stats`) |
-| COM12 | S3, нативный USB (команды `PING`/`INFO`/`START`/`STOP` + двоичный поток) |
+| COM13 | S3, нативный USB (команды `PING`/`INFO`/`START`/`STOP` + двоичный поток) |
 | COM11 | S3, UART-мост CH9102 (прошивка, boot-лог) |
 
 > ⚠️ Открытие COM8 дёргает DTR/RTS и перезагружает Master (обнуляет
@@ -254,9 +254,9 @@ Z1 пропали: 0 щелчков на 4 захватах (2 с + 3×6 с).
 idf.py -C firmware/capture build
 idf.py -C firmware/capture -p COM11 flash
 
-# Захват и разбор одного сценария: COM12 — сниффер на S3, COM8 — Master
+# Захват и разбор одного сценария: COM13 — сниффер на S3, COM8 — Master
 py -3.14 firmware/tools/capture-analyze.py `
-  --sniffer COM12 --master COM8 --scenario dup
+  --sniffer COM13 --master COM8 --scenario dup
 
 # Разбор готового файла без платы
 py -3.14 firmware/tools/capture-analyze.py `

@@ -152,7 +152,7 @@ pwsh -File .\firmware\tools\monitor.ps1 -Port COM14 -Commands "status,stats" -Se
 
 Блок `status` — 13 строк, замыкается строкой `Delay: n/n/n/n`. Если блок не
 замкнулся, парсер приложения ждёт следующего опроса и не обновит экран.
-Полный формат — `firmware/protocol/status-contract.md`.
+Полный формат — `protocol/status-contract.md`.
 
 ### Проверка границ потока
 
