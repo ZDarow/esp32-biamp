@@ -22,6 +22,34 @@ output-metadata.json
 idf-spike/
 idf-spike-*/
 
+# Локальные варианты прошивки (альтернативные пины, имена устройств) —
+# не коммитятся, используются только для локальной сборки/прошивки.
+firmware/ESP32_BiAmp_Local/
+firmware/ESP32_BiAmp_Local_v2/
+firmware/ESP32_BiAmp_AudioControl/
+firmware/ESP32_BiAmp_AudioControl_Unified/
+
+# Каталоги сборки локального варианта прошивки (arduino-cli --build-path).
+firmware/.build_local/
+firmware/.build_audiocontrol/
+
+# Локальные скрипты мониторинга COM-порта и их логи — одноразовые.
+monitor_com3.ps1
+monitor_output.txt
+monitor_output2.txt
+
+# ESP32-S3 DSP-хаб — отдельный проект, не часть монорепозитория BiAmp.
+s3-hub/
+
+# Локальные инструменты измерения (одноразовые скрипты).
+firmware/tools/analog-*.py
+firmware/tools/loopback-test.py
+firmware/tools/build_local.ps1
+firmware/tools/common_local.ps1
+
+# Каталог сборки прошивки DSP-хаба (ESP32-S3).
+s3-hub/.build/
+
 # Сниффер на ESP-IDF: sdkconfig создаётся из sdkconfig.defaults и содержит
 # локальные пути, каталог build/ уже исключён выше.
 firmware/capture/sdkconfig
@@ -93,3 +121,46 @@ biamp-signing.properties
 # Скриншоты чужих приложений (Prology и т.п.) — материал для сравнения,
 # а не исходники проекта: в публичный репозиторий не коммитим.
 Screenshot_*.png
+
+
+# --- ����������� ����� � ���� � ����� ������� (��������� ��� ������) ---
+/*.py
+/*.ps1
+/build_local.log
+/amazon_enc.html
+/flash_read_*.bin
+/Screenshot_*.png
+/monitor_output*.txt
+/Log/
+/.build_local*/
+/.build_relay/
+/biamp_globals.h
+/partitions.csv
+
+# --- Build-��������� � ���������� (arduino-cli --build-path) ---
+firmware/.build_*/
+firmware/.build*/
+s3-hub/.build*/
+android-app/build/
+android-app/.gradle/
+android-app/.kotlin/
+
+# Архив нерелевантных артефактов (перенесено из корня репо) — не коммитится.
+.archive/
+
+# Локальные варианты прошивки и эксперименты (не часть основной ветки) —
+# не коммитятся, используются только для локальной сборки/прошивки.
+firmware/ESP32_BiAmp_IDF/
+firmware/ESP32_BiAmp_Local*/
+firmware/ESP32_BiAmp_AudioControl*/
+firmware/ESP32_BiAmp_NEW_Fix/
+firmware/ESP32_BiAmp_Relay_B/
+firmware/ESP32_Encoder_Test/
+firmware/BDK-AUDIO-APP/
+
+# Локальные файлы разделов и тестовый мусор прошивки.
+firmware/partitions*.csv
+firmware/tests/ESP32_I2S_Capture/
+firmware/tests/Qwen_cpp/
+firmware/tests/*.md
+firmware/tests/*.wav
