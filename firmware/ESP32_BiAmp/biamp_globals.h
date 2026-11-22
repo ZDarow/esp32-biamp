@@ -12,9 +12,12 @@
 #define Z1_BCK 4
 #define Z1_LCK 15
 #define Z1_DIN 2
-#define Z2_BCK 25
+#define Z2_BCK 12
 #define Z2_LCK 27
-#define Z2_DIN 26
+#define Z2_DIN 14
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define OLED_ADDR 0x3C
 
 // ── Аудиопараметры ───────────────────────────────────────────────────
 #define SAMPLE_RATE     44100

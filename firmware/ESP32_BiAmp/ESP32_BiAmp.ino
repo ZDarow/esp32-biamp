@@ -89,6 +89,7 @@
 #include <ctype.h>
 #include <atomic>
 #include "biamp_globals.h"
+#include "biamp_version.h"
 
 // Выводы I²S разведены по двум портам: каждому усилилю свой порт со своими
 // тремя выводами. Общие пины у портов быть не могут — иначе один порт
@@ -1410,7 +1411,7 @@ void updateGeneralDisplay() {
 // ===================== SETUP / LOOP ===================================
 void setup() {
   Serial.begin(115200); delay(500);
-  Serial.println(F("\n\nboot: bi-amp v35.1 (lr swap instead of phase inversion)"));
+  Serial.println(F("\n\nboot: bi-amp " BIAMP_VERSION_STRING " (lr swap instead of phase inversion)"));
   Serial.print(F("Heap: ")); Serial.println(ESP.getFreeHeap());
   Serial.println(F("Type 'help' for commands"));
 
@@ -1507,7 +1508,8 @@ void setup() {
   Serial.println(F("A2DP: started"));
   Serial.print(F("Heap after A2DP: ")); Serial.println(ESP.getFreeHeap());
 
-  bool spp_ok = SerialBT.begin(DEVICE_NAME);
+  BTStatus spp_st = SerialBT.begin(DEVICE_NAME);
+  bool spp_ok = (spp_st == BTStatus::OK);
   Serial.print(F("SPP: ")); Serial.println(spp_ok ? F("OK") : F("FAIL"));
 
   Serial.print(F("Heap final: ")); Serial.println(ESP.getFreeHeap());
