@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -93,7 +95,7 @@ object ActionCatalog {
     }
 
     /** Диагностические запросы без аргументов, раздел 4.7. */
-    val DIAGNOSTICS: List<String> = listOf("stats", "help", "heap")
+    val DIAGNOSTICS: List<String> = listOf("stats", "drift", "help", "heap")
 
     /**
      * Команды транспорта, раздел 4.7.

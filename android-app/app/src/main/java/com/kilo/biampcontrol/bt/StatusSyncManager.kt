@@ -39,6 +39,13 @@ class StatusSyncManager(
     }
 
     fun onLine(line: String) {
+// ⚠️ Парсинг VU/Peak/LUFS/CompGR удалён: прошивка NEW (v35.2-local)
+        // не отдаёт эти метрики в `stats` — она пишет Underrun:/RingDrops:/
+        // Clips:/Starve: (диагностика). App ожидал VU:/Peak:/LUFS:/CompGR:,
+        // но формат не согласован ни с контрактом v35.1, ни с прошивкой.
+        // Поля vuL/vuR/peakL/peakR/lufs/compGr остаются в DeviceState только
+        // для совместимости с DspTab.kt (чужие правки) — не заполняются.
+        // Остатки VU-метров в DspTab.kt — мёртвый UI, убрать отдельно.
         val blockStarted = StatusParser.appendToBlock(statusBuffer, line, STATUS_LINES)
         if (blockStarted || StatusParser.isStatusLine(line)) {
             val r = StatusParser.parseDetailed(statusBuffer, _deviceState.value)
@@ -48,6 +55,10 @@ class StatusSyncManager(
                 if (StatusParser.isBlockEnd(line)) statusBuffer.clear()
             }
         }
+    }
+
+    fun updateDeviceState(transform: (DeviceState) -> DeviceState) {
+        _deviceState.value = transform(_deviceState.value)
     }
 
     fun requestStatusSync() {

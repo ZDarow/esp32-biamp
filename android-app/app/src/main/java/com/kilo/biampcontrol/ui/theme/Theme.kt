@@ -1,9 +1,14 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2. Источник истины — прошивка ESP32.
+ *
+ * Интерфейс портирован с BDK-AUDIO-APP: тёмная тема, пурпурный/циан
+ * акценты, карточки со скруглёнными углами, секционные заголовки.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -18,12 +23,11 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * If not, see <https://www.gnu.org/licenses/>.
  */
 package com.kilo.biampcontrol.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -38,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 /**
- * Тёмная схема — основная.
+ * Тёмная схема — основная, по палитре BDK-AUDIO-APP.
  *
  * Заданы все роли Material 3, а не пять: у Compose есть и `surfaceContainer*`
  * (четыре ступени, в них строятся карточки и неактивные треки), и
@@ -55,24 +59,24 @@ private val DarkColors = darkColorScheme(
     inversePrimary = BrandAccentSoft,
     secondary = BrandAlt,
     onSecondary = BrandOnAccent,
-    secondaryContainer = BrandLightAltContainer,
-    onSecondaryContainer = BrandLightAlt,
+    secondaryContainer = BrandAlt,
+    onSecondaryContainer = BrandOnAccent,
     tertiary = BrandAccentSoft,
     onTertiary = BrandOnAccent,
-    tertiaryContainer = BrandLightAccentContainer,
-    onTertiaryContainer = BrandLightAccent,
+    tertiaryContainer = BrandAccent,
+    onTertiaryContainer = BrandOnAccent,
     background = BrandBackground,
     onBackground = BrandTextPrimary,
     surface = BrandSurfaceLow,
     onSurface = BrandTextPrimary,
     surfaceVariant = BrandSurfaceHigh,
     onSurfaceVariant = BrandTextSecondary,
-    surfaceDim = Color(0xFF08080C),
+    surfaceDim = Color(0xFF080808),
     surfaceBright = BrandSurfaceHigh,
-    surfaceContainerLowest = Color(0xFF050508),
-    surfaceContainerLow = Color(0xFF0F0F16),
+    surfaceContainerLowest = Color(0xFF0A0A0A),
+    surfaceContainerLow = Color(0xFF121212),
     surfaceContainer = BrandSurfaceMid,
-    surfaceContainerHigh = Color(0xFF1E1E2A),
+    surfaceContainerHigh = Color(0xFF2D2D2D),
     surfaceContainerHighest = BrandDivider,
     outline = BrandOutline,
     outlineVariant = BrandDivider,
@@ -89,7 +93,7 @@ private val DarkColors = darkColorScheme(
  * Светлая схема — тот же акцент, затемнённый.
  *
  * Значения акцента не переиспользуются из тёмной темы: в тёмной акцент
- * светлее фона, в светлой темнее, и один и тот же циан на белом даёт
+ * светлее фона, в светлой темнее, и один и тот же пурпур на белом даёт
  * контраст ниже порога WCAG 1.4.11 для мелкого текста.
  */
 private val LightColors = lightColorScheme(
@@ -157,7 +161,7 @@ private val BiAmpShapes = Shapes(
  */
 @Composable
 fun BiAmpTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {

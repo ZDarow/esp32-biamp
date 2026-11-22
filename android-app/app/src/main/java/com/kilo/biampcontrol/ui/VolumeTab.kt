@@ -1,9 +1,14 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2. Источник истины — прошивка ESP32.
+ *
+ * Интерфейс портирован с BDK-AUDIO-APP: карточки со скруглёнными углами,
+ * секционные заголовки, пурпурный/циан акценты.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -18,9 +23,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * If not, see <https://www.gnu.org/licenses/>.
  */
-
 package com.kilo.biampcontrol.ui
 
 import androidx.compose.foundation.layout.*
@@ -37,7 +41,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
+import com.kilo.biampcontrol.bt.ConnState
 import com.kilo.biampcontrol.bt.Limits
+import com.kilo.biampcontrol.ui.theme.*
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -45,101 +51,139 @@ import kotlin.math.roundToInt
 fun VolumeTab(vm: BiAmpViewModel) {
     val ds by vm.deviceState.collectAsState()
     val connected by vm.connState.collectAsState()
-    val enabled = connected == com.kilo.biampcontrol.bt.ConnState.CONNECTED
-    // Mute берётся из строки `Mute: z0/z1` блока status, а не из локального
-    // флага: локальный флаг врал между нажатием и ответом усилителя и
-    // оставался врёным навсегда, если ответ терялся.
+    val enabled = connected == ConnState.CONNECTED
     val muted0 = ds.muted.getOrElse(0) { false }
     val muted1 = ds.muted.getOrElse(1) { false }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxSize().padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(stringResource(R.string.volume_title), style = MaterialTheme.typography.titleLarge)
-
-        LabeledSlider(
-            label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(),
-            range = Limits.VOL_MIN..Limits.VOL_MAX,
-            enabled = enabled, suffix = "%"
-        ) { vm.setVolBoth(it.roundToInt()) }
-
-        // Левая зона
-        LabeledSlider(
-            label = stringResource(R.string.volume_left), value = ds.vol0.toFloat(),
-            range = Limits.VOL_MIN..Limits.VOL_MAX,
-            enabled = enabled, suffix = "%"
-        ) { vm.setVol0(it.roundToInt()) }
-
-        // Правая зона
-        LabeledSlider(
-            label = stringResource(R.string.volume_right), value = ds.vol1.toFloat(),
-            range = Limits.VOL_MIN..Limits.VOL_MAX,
-            enabled = enabled, suffix = "%"
-        ) { vm.setVol1(it.roundToInt()) }
-
-        // Баланс
-        LabeledSlider(
-            label = stringResource(R.string.volume_balance), value = ds.bal,
-            range = Limits.BAL_MIN..Limits.BAL_MAX,
-            enabled = enabled, suffix = "", steps = 19
-        ) { vm.setBal(it.roundToInt()) }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            FilterChip(
-                selected = muted0, onClick = { vm.toggleMute(0) },
-                label = { Text(stringResource(R.string.mute_left)) }, enabled = enabled
-            )
-            FilterChip(
-                selected = muted1, onClick = { vm.toggleMute(1) },
-                label = { Text(stringResource(R.string.mute_right)) }, enabled = enabled
-            )
+        // ── 1. Статус подключения (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.conn_status_title))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (enabled) stringResource(R.string.conn_status_connected)
+                        else stringResource(R.string.conn_status_disconnected),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (enabled) BrandStatusOk else BrandStatusError
+                    )
+                    val devName = vm.rememberedName
+                    Text(
+                        text = if (enabled && devName != null) {
+                            String.format(Locale.getDefault(), stringResource(R.string.conn_status_device), devName)
+                        } else stringResource(R.string.conn_status_no_device),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = BrandTextSecondary
+                    )
+                }
+                if (!enabled) {
+                    BdkButton(
+                        onClick = { /* устройство выбирается через верхнюю панель */ },
+                        label = stringResource(R.string.btn_connect_other),
+                        enabled = false,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        // ── 2. Громкость (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.volume_title))
 
-        Text(stringResource(R.string.section_transport), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val transports = listOf(
-                ActionCatalog.Transport.PREV to Icons.Default.SkipPrevious,
-                ActionCatalog.Transport.PLAY to Icons.Default.PlayArrow,
-                ActionCatalog.Transport.PAUSE to Icons.Default.Pause,
-                ActionCatalog.Transport.NEXT to Icons.Default.SkipNext
-            )
-            transports.forEach { (action, icon) ->
-                TransportButton(
-                    icon = icon,
-                    contentDescription = stringResource(action.contentDescription),
-                    onClick = { vm.transport(action.command) },
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    emphasized = action == ActionCatalog.Transport.PLAY
+            LabeledSlider(
+                label = stringResource(R.string.volume_both), value = ds.vol0.toFloat(),
+                range = Limits.VOL_MIN..Limits.VOL_MAX,
+                enabled = enabled, suffix = "%"
+            ) { vm.setVolBoth(it.roundToInt()); vm.logUi("VOL", "both=${it.roundToInt()}") }
+
+            LabeledSlider(
+                label = stringResource(R.string.volume_left), value = ds.vol0.toFloat(),
+                range = Limits.VOL_MIN..Limits.VOL_MAX,
+                enabled = enabled, suffix = "%"
+            ) { vm.setVol0(it.roundToInt()); vm.logUi("VOL", "left=${it.roundToInt()}") }
+
+            LabeledSlider(
+                label = stringResource(R.string.volume_right), value = ds.vol1.toFloat(),
+                range = Limits.VOL_MIN..Limits.VOL_MAX,
+                enabled = enabled, suffix = "%"
+            ) { vm.setVol1(it.roundToInt()); vm.logUi("VOL", "right=${it.roundToInt()}") }
+
+            LabeledSlider(
+                label = stringResource(R.string.volume_balance), value = ds.bal,
+                range = Limits.BAL_MIN..Limits.BAL_MAX,
+                enabled = enabled, suffix = "", steps = 19
+            ) { vm.setBal(it.roundToInt()); vm.logUi("VOL", "bal=${it.roundToInt()}") }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = muted0, onClick = { vm.toggleMute(0); vm.logUi("MUTE", "left") },
+                    label = { Text(stringResource(R.string.mute_left)) }, enabled = enabled
+                )
+                FilterChip(
+                    selected = muted1, onClick = { vm.toggleMute(1); vm.logUi("MUTE", "right") },
+                    label = { Text(stringResource(R.string.mute_right)) }, enabled = enabled
                 )
             }
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-        Text(stringResource(R.string.section_presets), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val presets = listOf(
-                stringResource(R.string.preset_flat),
-                stringResource(R.string.preset_voice),
-                stringResource(R.string.preset_night),
-                stringResource(R.string.preset_party)
-            )
-            presets.forEachIndexed { i, name ->
-                ChoiceButton(
-                    label = name,
-                    onClick = { vm.preset(i) },
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled
+        // ── 3. Пресеты эквалайзера (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.section_eq_presets))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val presets = listOf(
+                    stringResource(R.string.eq_preset_flat) to "Flat",
+                    stringResource(R.string.eq_preset_bass) to "Bass",
+                    stringResource(R.string.eq_preset_treble) to "Treble",
+                    stringResource(R.string.eq_preset_vshape) to "V-Shape"
                 )
+                presets.forEachIndexed { i, (label, name) ->
+                    ChoiceButton(
+                        label = label,
+                        onClick = { vm.applyEqPreset(name); vm.logUi("EQ_PRESET", name) },
+                        modifier = Modifier.weight(1f),
+                        enabled = enabled
+                    )
+                }
+            }
+        }
+
+        // ── 4. Индикатор уровней (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.section_audio_levels))
+            Text(
+                text = stringResource(R.string.level_waiting),
+                style = MaterialTheme.typography.bodySmall,
+                color = BrandTextTertiary
+            )
+        }
+
+        // ── 5. Транспорт ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.section_transport))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val transports = listOf(
+                    ActionCatalog.Transport.PREV to Icons.Default.SkipPrevious,
+                    ActionCatalog.Transport.PLAY to Icons.Default.PlayArrow,
+                    ActionCatalog.Transport.PAUSE to Icons.Default.Pause,
+                    ActionCatalog.Transport.NEXT to Icons.Default.SkipNext
+                )
+                transports.forEach { (action, icon) ->
+                    TransportButton(
+                        icon = icon,
+                        contentDescription = stringResource(action.contentDescription),
+                        onClick = { vm.transport(action.command); vm.logUi("TRANSPORT", action.command) },
+                        modifier = Modifier.weight(1f),
+                        enabled = enabled,
+                        emphasized = action == ActionCatalog.Transport.PLAY
+                    )
+                }
             }
         }
     }
 }
-
-

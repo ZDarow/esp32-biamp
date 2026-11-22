@@ -93,12 +93,12 @@ const val GRAPH_DB_MAX = 6.0
  * и [SEC_BYPASS]; остальные приведены полностью, чтобы порт совпадал с
  * прошивкой и не молча считал неверные коэффициенты.
  */
-private const val SEC_LOWPASS = 0
-private const val SEC_HIGHPASS = 1
-private const val SEC_PEAK_EQ = 2
-private const val SEC_LOWSHELF = 3
-private const val SEC_HIGHSHELF = 4
-private const val SEC_BYPASS = 5
+internal const val SEC_LOWPASS = 0
+internal const val SEC_HIGHPASS = 1
+internal const val SEC_PEAK_EQ = 2
+internal const val SEC_LOWSHELF = 3
+internal const val SEC_HIGHSHELF = 4
+internal const val SEC_BYPASS = 5
 
 /**
  * Нормированные коэффициенты одной секции RBJ.
@@ -454,7 +454,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             resp = resp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
+                .height(160.dp)
                 .semanticsMerge(
                     stringResource(
                         R.string.graph_cd, bandTitle,
@@ -467,7 +467,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
 
         AxisLabels()
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
 
         Text(
             bandTitle,
@@ -476,12 +476,12 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
 
         // Переключение полосы
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             BANDS.forEachIndexed { i, b ->
                 FilterChip(
@@ -494,7 +494,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+Spacer(Modifier.height(6.dp))
 
         StepperRow(stringResource(R.string.stepper_hp), hpStep.pos, band, enabled) { hz ->
             hpStep.set(hz)
@@ -528,7 +528,7 @@ fun FilterGraph(vm: BiAmpViewModel, ds: DeviceState, enabled: Boolean) {
             )
         }
 
-// Фазы у полосы больше нет: инверсию знака убрали из прошивки в v35.
+        // Фазы у полосы больше нет: инверсию знака убрали из прошивки в v35.
         // Настройку сдвига сторон делает перестановка Л/П в блоке DSP —
         // она общая для полосы, а не отдельная настройка каждой.
         Text(
@@ -658,7 +658,7 @@ private fun StepperRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp),
+            .height(44.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(

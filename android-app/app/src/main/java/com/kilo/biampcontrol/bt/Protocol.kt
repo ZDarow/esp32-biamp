@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в protocol/status-contract.md, раздел 2.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -40,12 +42,12 @@ object Limits {
     const val FC_MAX = 1000f
     const val HP_MIN = 20f
     const val HP_MAX = 80f
-    const val TRIM_MIN = -6f
-    const val TRIM_MAX = 3f
+    const val TRIM_MIN = -9f
+    const val TRIM_MAX = 6f
     const val EQ_MIN = -12f
     const val EQ_MAX = 12f
     const val DELAY_MIN = 0
-    const val DELAY_MAX = 220
+    const val DELAY_MAX = 1024
     const val CH_FILTER_MIN = 20
     const val CH_FILTER_MAX = 20000
     const val TEST_VOL_MIN = 0
@@ -66,7 +68,9 @@ object StatusTokens {
     const val OFF = "OFF"
     const val ONE = "1"
     const val ZERO = "0"
+    const val LR24 = "LR24"
     const val LR4 = "LR4"
+    const val BW12 = "BW12"
     const val BUTTER = "Butter"
 }
 
@@ -93,11 +97,30 @@ data class DeviceState(
     val sppOn: Boolean = false,
     val testMode: Int = 0,
     val testVol: Int = 6,                       // громкость тест-сигнала, %
-    val xoType: Int = 1,                       // 1 = Butterworth, 2 = LR4
+    val xoType: Int = 1,                       // 1 = BW12/Butterworth, 2 = LR24/LR4
     val xoOn: Boolean = true,                  // выключатель кроссовера (секции 1..4)
     val srcKhz: String = "44.1",                // частота источника из строки "Src:"
     val delays: List<Int> = listOf(0, 0, 0, 0), // сэмплы для delay0..delay3
-    val chFilters: List<Pair<Int, Int>> = listOf(0 to 0, 0 to 0, 0 to 0, 0 to 0) // (hp, lp) для ch0..ch3
+    val chFilters: List<Pair<Int, Int>> = listOf(0 to 0, 0 to 0, 0 to 0, 0 to 0), // (hp, lp) для ch0..ch3
+// ⚠️ Поля vuL/vuR/peakL/peakR/lufs/compGr оставлены в DeviceState только
+    // для совместимости с DspTab.kt (чужие правки): VU-метры и
+    // GainReductionMeter читают ds.vuL/ds.peakL/ds.compGr/ds.lufs. Удалять
+    // их отсюда пришлось бы править DspTab.kt — трогать чужие правки не
+    // будем. Реальное значение этих полей НЕ заполняется: StatusSyncManager
+    // больше не парсит `stats`, потому что прошивка NEW (v35.2-local) не
+    // отдаёт VU:/Peak:/LUFS:/CompGR: — она пишет Underrun:/RingDrops:/
+    // Clips:/Starve: (диагностика). Формат не согласован ни с контрактом
+    // v35.1, ни с прошивкой. Метры в UI показывают дефолт (-80 дБ / 0 дБ),
+    // то есть «холодные», но сборка не падает.
+    val vuL: Float = -80f,
+    val vuR: Float = -80f,
+    val peakL: Float = 0f,
+    val peakR: Float = 0f,
+    val lufs: Float = -80f,
+    val compGr: Float = 0f,
+    val compOn: Boolean = false,    // Комpressor вкл/выкл
+    val gateOn: Boolean = false,    // Noise gate вкл/выкл
+    val agcOn: Boolean = false,     // AGC вкл/выкл
 )
 
 /**
@@ -137,18 +160,9 @@ object StatusParser {
     private val reBt   = Regex("BT:\\s+(${StatusTokens.ON}|${StatusTokens.OFF})(?:\\s*\\|\\s*SPP:\\s+(${StatusTokens.ON}|${StatusTokens.OFF}))?")
     private val reTest = Regex("Test:\\s+(\\d+)(?:\\s+TVol=(\\d+)%)?")
     private val reSrc  = Regex("Src:\\s+([\\d.]+)\\s*kHz")
-    private val reXo   = Regex("XO:\\s+(${StatusTokens.BUTTER}|${StatusTokens.LR4})(?:\\s+(${StatusTokens.ON}|${StatusTokens.OFF}))?")
+    private val reXo   = Regex("XO:\\s+(${StatusTokens.BW12}|${StatusTokens.LR24}|${StatusTokens.BUTTER}|${StatusTokens.LR4})(?:\\s+(${StatusTokens.ON}|${StatusTokens.OFF}))?")
     private val reChf  = Regex("CHF:\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)\\s+(\\d+)/(\\d+)")
     private val reDly  = Regex("Delay:\\s+(\\d+)/(\\d+)/(\\d+)/(\\d+)")
-
-    /**
-     * Шаблоны строк блока `status` — по ним же строка причисляется к блоку.
-     *
-     * Список задан явно, а не выводится из `object`: он одновременно служит
-     * фильтром «это строка статуса, а не вывод `help`/`stats`/`heap`» и
-     * источником строк для контрактного теста. Добавление новой строки в
-     * контракт обязано добавлять её и сюда, иначе тест упадёт.
-     */
     private val allLinePatterns = listOf(
         reVol, reFc, reTrim, reEq, reMute, reSwp, reDup, reBt, reTest, reSrc, reXo, reChf, reDly
     )
@@ -286,8 +300,9 @@ object StatusParser {
                 s = s.copy(srcKhz = m.groupValues[1]); found = true; recognized = true
             }
             reXo.find(l)?.let { m ->
+                val name = m.groupValues[1]
                 s = s.copy(
-                    xoType = if (m.groupValues[1] == StatusTokens.LR4) 2 else 1,
+                    xoType = if (name == StatusTokens.LR24 || name == StatusTokens.LR4) 2 else 1,
                     // Старая прошивка без хвоста " ON"/" OFF" ничего не сообщает
                     // о выключателе: там кроссовер всегда включён, поэтому
                     // отсутствие группы означает ON, а не потерю связи.

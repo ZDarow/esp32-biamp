@@ -1,9 +1,14 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2. Источник истины — прошивка ESP32.
+ *
+ * Интерфейс портирован с BDK-AUDIO-APP: карточки со скруглёнными углами,
+ * секционные заголовки, пурпурный/циан акценты.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -18,7 +23,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * If not, see <https://www.gnu.org/licenses/>.
  */
 package com.kilo.biampcontrol.ui
 
@@ -35,6 +40,7 @@ import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
 import com.kilo.biampcontrol.bt.Limits
+import com.kilo.biampcontrol.ui.theme.*
 import kotlin.math.roundToInt
 
 @Composable
@@ -42,11 +48,8 @@ fun DspTab(vm: BiAmpViewModel) {
     val ds by vm.deviceState.collectAsState()
     val connected by vm.connState.collectAsState()
     val enabled = connected == ConnState.CONNECTED
+    val isDirty by vm.isDirty.collectAsState()
 
-    // Выключенные секции оставляют Fc и HPF в памяти (их нечем менять, пока
-    // фильтры считаются как bypass), поэтому ручки остаются на месте и видимыми —
-    // просто задизейблены. Иначе при выключении секции они бы исчезли, и
-    // вторая ручка съезжала бы с места в горизонтальной линии.
     val xoEnabled = enabled && ds.xoOn
     val subEnabled = enabled && ds.subOn
 
@@ -54,227 +57,103 @@ fun DspTab(vm: BiAmpViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(stringResource(R.string.dsp_title), style = MaterialTheme.typography.titleLarge)
-
-        // ── 1. Кроссовер и сабсоник: две крупные ручки в одну линию ──
-        Text(stringResource(R.string.xo_title), style = MaterialTheme.typography.titleMedium)
-        Caption(stringResource(R.string.xo_caption))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.xo_switch), style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    stringResource(
-                        if (ds.xoOn) R.string.xo_state_on else R.string.xo_state_off
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+        // ── 1. DSP Controls (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.xo_title))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.xo_switch), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                BdkSwitch(checked = ds.xoOn, onCheckedChange = { vm.setXoOn(it); vm.logUi("XO", "on=${it}") }, enabled = enabled)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                BdkSwitch(checked = ds.subOn, onCheckedChange = { vm.setSub(it); vm.logUi("SUB", "on=${it}") }, enabled = enabled)
             }
-            Switch(checked = ds.xoOn, onCheckedChange = { vm.setXoOn(it) }, enabled = enabled)
-        }
-        Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1) },
-                       label = { Text("Butterworth") }, enabled = xoEnabled,
-                      modifier = Modifier.weight(1f))
-            FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2) },
-                       label = { Text("LR4") }, enabled = xoEnabled,
-                      modifier = Modifier.weight(1f))
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(R.string.subsonic_hpf), style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f))
-            Switch(checked = ds.subOn, onCheckedChange = { vm.setSub(it) }, enabled = enabled)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                BdkSwitch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it); vm.logUi("SWAP", "on=${it}") }, enabled = enabled)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                BdkSwitch(checked = ds.dup, onCheckedChange = { vm.setDup(it); vm.logUi("DUP", "on=${it}") }, enabled = enabled)
+            }
+            if (ds.dup) {
+                Text(stringResource(R.string.dup_warning), style = MaterialTheme.typography.bodySmall, color = BrandStatusError)
+            }
         }
 
-        // Обе частотные ручки стоят в одну горизонталь: их выставляют вместе,
-        // слушая один и тот же фрагмент записи, и вертикальный список заставлял
-        // прокручивать экран между ними. Подписи вынесены под ручки, иначе
-        // подписи наезжали бы друг на друга на узком экране.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.Top
-        ) {
-            DialKnob(
-                label = stringResource(R.string.xo_fc),
-                value = ds.fc,
-                range = 200f..1000f,
-                steps = 15,
-                enabled = xoEnabled,
-                resetTo = Limits.FC_DEFAULT,
-                modifier = Modifier.weight(1f)
-            ) { vm.setFc(it.roundToInt()) }
-
-            DialKnob(
-                label = stringResource(R.string.subsonic_knob),
-                value = ds.hp,
-                range = 20f..80f,
-                steps = 11,
-                enabled = subEnabled,
-                resetTo = Limits.HP_DEFAULT,
-                modifier = Modifier.weight(1f)
-            ) { vm.setHp(it.roundToInt()) }
+        // ── 2. Кроссовер ──
+        BdkCard {
+            Column(Modifier.padding(0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.xo_type), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    FilterChip(selected = ds.xoType == 1, onClick = { vm.setXoType(1); vm.logUi("XO_TYPE", "BW12") }, label = { Text("BW12", style = MaterialTheme.typography.bodySmall) }, enabled = xoEnabled)
+                    Spacer(Modifier.width(4.dp))
+                    FilterChip(selected = ds.xoType == 2, onClick = { vm.setXoType(2); vm.logUi("XO_TYPE", "LR24") }, label = { Text("LR24", style = MaterialTheme.typography.bodySmall) }, enabled = xoEnabled)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    DialKnob(stringResource(R.string.xo_fc), ds.fc, 200f..1000f, 15, xoEnabled, Modifier.weight(1f), Limits.FC_DEFAULT) { vm.setFc(it.roundToInt()); vm.logUi("XO_FC", "${it.roundToInt()}") }
+                    DialKnob(stringResource(R.string.subsonic_knob), ds.hp, 20f..80f, 11, subEnabled, Modifier.weight(1f), Limits.HP_DEFAULT) { vm.setHp(it.roundToInt()); vm.logUi("HPF", "${it.roundToInt()}") }
+                }
+            }
         }
 
-        HorizontalDivider()
-
-        // ── 2. Эквалайзер ────────────────────────────────────────
-        Text(stringResource(R.string.eq_title), style = MaterialTheme.typography.titleMedium)
-        EqRow(stringResource(R.string.eq_low), ds.eql, enabled, { vm.setEq(0, 0) }) { vm.setEq(0, it.roundToInt()) }
-        EqRow(stringResource(R.string.eq_mid), ds.eqm, enabled, { vm.setEq(1, 0) }) { vm.setEq(1, it.roundToInt()) }
-        EqRow(stringResource(R.string.eq_high), ds.eqh, enabled, { vm.setEq(2, 0) }) { vm.setEq(2, it.roundToInt()) }
-
-        HorizontalDivider()
-
-        // ── 3. Полосы СЧ/ВЧ: точка подстройки поверх кроссовера ──
-        Text(stringResource(R.string.band_title), style = MaterialTheme.typography.titleMedium)
-        Caption(stringResource(R.string.band_caption))
-        FilterGraph(vm, ds, enabled)
-
-        HorizontalDivider()
-
-        // ── 5. Раскладка выходов: L/R и дублирование 2,3 ──────────
-        // Предупреждение о DUP обязано быть на экране: при DUP: 1 каналы
-        // 2 и 3 физически молчат, и без этой строки пользователь ищет
-        // неисправность в усилителе, а не в настройке.
-        if (ds.dup) {
-            Text(
-                stringResource(R.string.dup_warning),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(R.string.swap_switch), style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f))
-            Switch(checked = ds.swapped, onCheckedChange = { vm.setSwap(it) }, enabled = enabled)
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(stringResource(R.string.dup_switch), style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f))
-            Switch(checked = ds.dup, onCheckedChange = { vm.setDup(it) }, enabled = enabled)
+        // ── 3. Эквалайзер (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.eq_title))
+            EqRow(stringResource(R.string.eq_low), ds.eql, enabled, { vm.setEq(0, 0); vm.logUi("EQ", "low=0") }) { vm.setEq(0, it.roundToInt()); vm.logUi("EQ", "low=${it.roundToInt()}") }
+            EqRow(stringResource(R.string.eq_mid), ds.eqm, enabled, { vm.setEq(1, 0); vm.logUi("EQ", "mid=0") }) { vm.setEq(1, it.roundToInt()); vm.logUi("EQ", "mid=${it.roundToInt()}") }
+            EqRow(stringResource(R.string.eq_high), ds.eqh, enabled, { vm.setEq(2, 0); vm.logUi("EQ", "high=0") }) { vm.setEq(2, it.roundToInt()); vm.logUi("EQ", "high=${it.roundToInt()}") }
+            EqCurve(eql = ds.eql, eqm = ds.eqm, eqh = ds.eqh, onEqChange = { band, gain -> vm.setEq(band, gain.roundToInt()); vm.logUi("EQ_CURVE", "band=$band gain=${gain.roundToInt()}") }, modifier = Modifier.fillMaxWidth().height(44.dp))
+            // Link L/R toggle
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Link L/R", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                var linkEnabled by remember { mutableStateOf(false) }
+                BdkSwitch(checked = linkEnabled, onCheckedChange = { linkEnabled = it }, enabled = enabled)
+            }
+            // EQ пресеты
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val presets = listOf("Flat", "Bass", "Treble", "V-Shape")
+                presets.forEach { name ->
+                    FilterChip(selected = false, onClick = { vm.applyEqPreset(name); vm.logUi("EQ_PRESET", name) }, label = { Text(name, style = MaterialTheme.typography.bodySmall) }, enabled = enabled, modifier = Modifier.weight(1f))
+                }
+            }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // ── 4. Фильтры каналов ──
+        BdkCard {
+            Column(Modifier.padding(0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(stringResource(R.string.band_title), style = MaterialTheme.typography.bodyMedium)
+                FilterGraph(vm, ds, enabled)
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        Text("SR: 44.1 кГц  16 бит  |  ${if (isDirty) "Modified" else "Saved"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-/**
- * Ручка с подписью для горизонтальной линии.
- *
- * Подпись стоит под крутилкой, а не рядом: на две ручки в ряд ширины
- * не хватает, и подпись сбоку выдавила бы вторую ручку за край экрана.
- * Текущее значение выводится в центре самой ручки — там, куда смотрит
- * глаз во время поворота, — поэтому подпись держит только название.
- * Двойной тап возвращает [resetTo], то есть заводское значение: руку
- * увели с узкого места и обратно уже не угадаешь на слух.
- */
 @Composable
-private fun DialKnob(
-    label: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    resetTo: Float,
-    onFinished: (Float) -> Unit
-) {
-    val stateText = sliderStateText(value, steps, " Гц")
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Dial(
-            value = value,
-            valueRange = range,
-            onValueChangeFinished = onFinished,
-            enabled = enabled,
-            steps = steps,
-            diameter = 132.dp,
-            label = label,
-            stateText = stateText,
-            valueText = stateText,
-            defaultValue = resetTo
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.outline
-        )
-    }
-}
-
-/** Пояснение под заголовком блока: чем этот блок отличается от соседнего. */
-@Composable
-private fun Caption(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
-
-// ── Полоса EQ: кнопка «0» в строке заголовка, слайдер отдельно ──
-/**
- * Одна копия значения полосы: `pos`. Подтверждается значением с устройства
- * через [LaunchedEffect] и передаётся в [CompactSlider] как есть — у ползунка
- * своего состояния больше нет.
- */
-@Composable
-private fun EqRow(label: String, value: Float, enabled: Boolean,
-                  onReset: () -> Unit, onFinished: (Float) -> Unit) {
+private fun EqRow(label: String, value: Float, enabled: Boolean, onReset: () -> Unit, onFinished: (Float) -> Unit) {
     val pos = remember { mutableFloatStateOf(value) }
-    // floatValue вместо value: mutableFloatStateOf хранит Float в примитиве,
-    // и обращение через value упаковывало бы его в Float на каждом кадре
-    // (lint AutoboxingStateValueProperty).
     LaunchedEffect(value) { pos.floatValue = value }
     val stateText = "${pos.floatValue.roundToInt()} дБ"
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Text(stateText,
-             style = MaterialTheme.typography.bodyMedium,
-             color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            onClick = onReset, enabled = enabled,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            modifier = Modifier
-                .height(26.dp)
-                .semanticsMerge(stringResource(R.string.eq_reset_cd, label), null)
-        ) { Text("0", style = MaterialTheme.typography.bodySmall) }
+        Text(stateText, style = MaterialTheme.typography.bodyMedium, color = BrandAccent)
+        Spacer(Modifier.width(4.dp))
+        OutlinedButton(onClick = onReset, enabled = enabled, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp), modifier = Modifier.height(24.dp)) { Text("0", style = MaterialTheme.typography.bodySmall) }
     }
-    // Контейнер height(28.dp) — компактная высота при зоне касания 48 dp
-    Row(Modifier.fillMaxWidth().height(28.dp)) {
-        CompactSlider(
-            value = pos.floatValue, onValueChange = { pos.floatValue = it },
-            onValueChangeFinished = { onFinished(pos.floatValue) },
-            valueRange = Limits.EQ_MIN..Limits.EQ_MAX, steps = 23, enabled = enabled,
-            contentDescription = label,
-            stateDescriptionText = stateText,
-            modifier = Modifier.fillMaxWidth()
-        )
+    Row(Modifier.fillMaxWidth().height(24.dp)) {
+        CompactSlider(value = pos.floatValue, onValueChange = { pos.floatValue = it }, onValueChangeFinished = { onFinished(pos.floatValue) }, valueRange = Limits.EQ_MIN..Limits.EQ_MAX, steps = 23, enabled = enabled, contentDescription = label, stateDescriptionText = stateText, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun DialKnob(label: String, value: Float, range: ClosedFloatingPointRange<Float>, steps: Int, enabled: Boolean, modifier: Modifier = Modifier, resetTo: Float, onFinished: (Float) -> Unit) {
+    val stateText = "${value.roundToInt()}"
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Dial(value = value, valueRange = range, onValueChangeFinished = { onFinished(value) }, enabled = enabled, steps = steps, diameter = 52.dp, label = label, stateText = stateText, valueText = stateText, defaultValue = resetTo)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline)
     }
 }

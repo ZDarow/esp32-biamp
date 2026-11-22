@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2. Источник истины — прошивка ESP32.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -18,12 +20,15 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.kilo.biampcontrol.ui
 
 import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +46,7 @@ import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
 import com.kilo.biampcontrol.bt.Limits
+import java.io.File
 import java.nio.charset.StandardCharsets
 import kotlin.math.roundToInt
 
@@ -53,21 +59,46 @@ fun ServiceTab(vm: BiAmpViewModel) {
     val enabled = connected == ConnState.CONNECTED
     val scrollState = rememberScrollState()
     var showDoc by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var showAutoEqDialog by remember { mutableStateOf(false) }
+
+    val autoEqFileLauncher = rememberLauncherForActivityResult(OpenDocument()) { uri ->
+        uri?.let { vm.applyAutoEqFile(it) }
+        showAutoEqDialog = false
+    }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxSize().padding(12.dp).verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(stringResource(R.string.service_title), style = MaterialTheme.typography.titleLarge)
+
+        // ── Настройки устройства (BDK карточка) ──
+        BdkCard {
+            BdkSectionTitle(stringResource(R.string.section_device_settings))
+            BdkTextField(
+                value = vm.deviceName,
+                onValueChange = { vm.deviceName = it },
+                label = stringResource(R.string.label_device_name),
+                enabled = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            BdkButton(
+                onClick = { /* имя сохраняется локально при изменении поля */ },
+                label = stringResource(R.string.btn_apply_name),
+                enabled = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Text(stringResource(R.string.section_speaker_test), style = MaterialTheme.typography.titleMedium)
         val columns = ActionCatalog.TEST_GRID_COLUMNS
         ActionCatalog.gridRows(ActionCatalog.TEST_MODES, columns).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { action ->
                     ChoiceButton(
                         label = stringResource(action.label),
-                        onClick = { vm.startTest(action.mode) },
+                        onClick = { vm.startTest(action.mode); vm.logUi("TEST", action.mode) },
                         modifier = Modifier.weight(1f),
                         enabled = enabled,
                         destructive = action.destructive
@@ -82,18 +113,18 @@ fun ServiceTab(vm: BiAmpViewModel) {
         }
 
         var tfText by remember { mutableStateOf("440") }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BdkTextField(
                 value = tfText,
                 onValueChange = { tfText = it.filter { c -> c.isDigit() } },
-                label = { Text(stringResource(R.string.label_hz)) },
+                label = stringResource(R.string.label_hz),
                 enabled = enabled,
-                modifier = Modifier.weight(1f),
-                singleLine = true
+                modifier = Modifier.weight(1f)
             )
             OutlinedButton(
-                onClick = { tfText.toIntOrNull()?.let { vm.setTf(it) } },
-                enabled = enabled
+                onClick = { tfText.toIntOrNull()?.let { vm.setTf(it); vm.logUi("TF", "$it Hz") } },
+                enabled = enabled,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
             ) { Text("TF") }
         }
 
@@ -107,13 +138,13 @@ fun ServiceTab(vm: BiAmpViewModel) {
             enabled = enabled,
             suffix = "%",
             steps = 5
-        ) { vm.setTestVol(it.roundToInt()) }
+        ) { vm.setTestVol(it.roundToInt()); vm.logUi("TVOL", "${it.roundToInt()}%") }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(stringResource(R.string.section_diagnostics), style = MaterialTheme.typography.titleMedium)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
+        BdkCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(8.dp)) {
                 if (syncing) {
                     Text(
                         stringResource(R.string.syncing),
@@ -121,58 +152,114 @@ fun ServiceTab(vm: BiAmpViewModel) {
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                Text("V0=${ds.vol0}% V1=${ds.vol1}% bal=${ds.bal}")
-                Text("Fc=${ds.fc.toInt()}Hz hp=${ds.hp.toInt()}Hz sub=${if (ds.subOn) "ON" else "OFF"}")
-                Text("XO: ${if (ds.xoType == 2) "LR4" else "Butter"} ${if (ds.xoOn) "ON" else "OFF"}")
-                Text("TLF=${ds.tlf}dB THF=${ds.thf}dB")
-                Text("EQ: ${ds.eql}/${ds.eqm}/${ds.eqh}")
+                Text("V0=${ds.vol0}% V1=${ds.vol1}% bal=${ds.bal}", style = MaterialTheme.typography.bodySmall)
+                Text("Fc=${ds.fc.toInt()}Hz hp=${ds.hp.toInt()}Hz sub=${if (ds.subOn) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
+                Text("XO: ${if (ds.xoType == 2) "LR24" else "BW12"} ${if (ds.xoOn) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
+                Text("TLF=${ds.tlf}dB THF=${ds.thf}dB", style = MaterialTheme.typography.bodySmall)
+                Text("EQ: ${ds.eql}/${ds.eqm}/${ds.eqh}", style = MaterialTheme.typography.bodySmall)
 // Строки контракта, раздела 2: Mute, SWP, DUP. Инверсии фазы
                 // в v35 нет — команда inv: удалена, поле INV: тоже.
-                Text("Mute: ${ds.muted[0]}/${ds.muted[1]}")
-                Text("SWP: ${if (ds.swapped) 1 else 0}")
-                Text("DUP: ${if (ds.dup) 1 else 0}")
-                Text("BT: ${if (ds.btAudioOn) "ON" else "OFF"} | SPP: ${if (ds.sppOn) "ON" else "OFF"}")
-                Text("Test: ${ds.testMode} TVol=${ds.testVol}%")
-                Text("Delay: ${ds.delays.joinToString("/")}")
-                Text("CHF: ${ds.chFilters.joinToString(" ") { "${it.first}/${it.second}" }}")
+                Text("Mute: ${ds.muted[0]}/${ds.muted[1]}", style = MaterialTheme.typography.bodySmall)
+                Text("SWP: ${if (ds.swapped) 1 else 0}", style = MaterialTheme.typography.bodySmall)
+                Text("DUP: ${if (ds.dup) 1 else 0}", style = MaterialTheme.typography.bodySmall)
+                Text("BT: ${if (ds.btAudioOn) "ON" else "OFF"} | SPP: ${if (ds.sppOn) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
+                Text("Test: ${ds.testMode} TVol=${ds.testVol}%", style = MaterialTheme.typography.bodySmall)
+                Text("Delay: ${ds.delays.joinToString("/")}", style = MaterialTheme.typography.bodySmall)
+                Text("CHF: ${ds.chFilters.joinToString(" ") { "${it.first}/${it.second}" }}", style = MaterialTheme.typography.bodySmall)
+                if (vm.fileLogger.exists) {
+                    Text("Лог: ${vm.fileLogger.filePath}", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ActionCatalog.DIAGNOSTICS.forEach { command ->
                 ChoiceButton(
                     label = command,
-                    onClick = { vm.sendDiagnostic(command) },
+                    onClick = { vm.sendDiagnostic(command); vm.logUi("DIAG", command) },
                     modifier = Modifier.weight(1f),
                     enabled = enabled
                 )
             }
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        Text(stringResource(R.string.section_backup), style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ChoiceButton(
+                label = stringResource(R.string.action_backup),
+                onClick = { vm.backupConfig(); vm.logUi("BACKUP", "save") },
+                modifier = Modifier.weight(1f),
+                enabled = enabled
+            )
+            ChoiceButton(
+                label = stringResource(R.string.action_restore),
+                onClick = { showRestoreDialog = true; vm.logUi("BACKUP", "restore dialog") },
+                modifier = Modifier.weight(1f),
+                enabled = enabled && vm.listBackups().isNotEmpty()
+            )
+        }
+        val backups = vm.listBackups()
+        if (backups.isNotEmpty()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Бекапы:", style = MaterialTheme.typography.bodySmall)
+                backups.forEach { backupFile ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(backupFile.name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        ChoiceButton(
+                            label = stringResource(R.string.action_restore_short),
+                            onClick = { vm.restoreConfig(backupFile); vm.logUi("BACKUP", "restore ${backupFile.name}") },
+                            modifier = Modifier.weight(0f),
+                            enabled = enabled
+                        )
+                        ChoiceButton(
+                            label = stringResource(R.string.action_delete),
+                            onClick = { vm.deleteBackup(backupFile); vm.logUi("BACKUP", "delete ${backupFile.name}") },
+                            modifier = Modifier.weight(0f),
+                            enabled = enabled
+                        )
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        Text(stringResource(R.string.section_autoeq), style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ChoiceButton(
+                label = stringResource(R.string.action_autoeq_import),
+                onClick = { showAutoEqDialog = true; autoEqFileLauncher.launch(arrayOf("*/*")); vm.logUi("AUTOEQ", "import dialog") },
+                modifier = Modifier.weight(1f),
+                enabled = enabled
+            )
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(stringResource(R.string.section_danger), style = MaterialTheme.typography.titleMedium)
         DangerConfirmButton(
             label = stringResource(R.string.action_save),
-            onConfirm = { vm.saveParams() },
+            onConfirm = { vm.saveParams(); vm.logUi("SAVE", "config") },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled
         )
         DangerConfirmButton(
             label = stringResource(R.string.action_reboot),
-            onConfirm = { vm.reboot() },
+            onConfirm = { vm.reboot(); vm.logUi("REBOOT", "device") },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled
         )
         DangerConfirmButton(
             label = stringResource(R.string.action_factory),
-            onConfirm = { vm.factoryReset() },
+            onConfirm = { vm.factoryReset(); vm.logUi("FACTORY", "reset") },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
             destructive = true
         )
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(stringResource(R.string.section_docs), style = MaterialTheme.typography.titleMedium)
         ChoiceButton(
@@ -181,11 +268,11 @@ fun ServiceTab(vm: BiAmpViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(stringResource(R.string.section_log), style = MaterialTheme.typography.titleMedium)
-        Card(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp)) {
-            Column(modifier = Modifier.padding(8.dp).verticalScroll(rememberScrollState())) {
+        BdkCard(modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp, max = 160.dp)) {
+            Column(modifier = Modifier.padding(6.dp).verticalScroll(rememberScrollState())) {
                 log.takeLast(15).forEach { line ->
                     Text(line, style = MaterialTheme.typography.bodySmall)
                 }
@@ -195,6 +282,15 @@ fun ServiceTab(vm: BiAmpViewModel) {
 
     if (showDoc) {
         DocSheet(onDismiss = { showDoc = false })
+    }
+
+    if (showRestoreDialog) {
+        RestoreDialog(
+            onDismiss = { showRestoreDialog = false },
+            onRestore = { vm.restoreConfig(it) },
+            backups = vm.listBackups(),
+            enabled = enabled
+        )
     }
 }
 
@@ -221,7 +317,7 @@ private fun DocSheet(onDismiss: () -> Unit) {
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(R.string.docs_dialog_title),
@@ -240,16 +336,16 @@ private fun DocSheet(onDismiss: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 480.dp)
+                    .heightIn(max = 360.dp)
                     .verticalScroll(scroll)
             ) {
                 lines.forEach { MdLine(it) }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -308,6 +404,79 @@ private fun loadDoc(ctx: Context): List<MdLine> {
         val code = t.startsWith("`") && t.endsWith("`") && t.length > 2
         MdLine(text, level, bold, code)
     }.toList()
+}
+
+@Composable
+private fun RestoreDialog(
+    onDismiss: () -> Unit,
+    onRestore: (File) -> Unit,
+    backups: List<File>,
+    enabled: Boolean
+) {
+    var selectedBackup by remember { mutableStateOf<File?>(null) }
+
+    val backupList = backups.joinToString(separator = "\n") { it.name }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.dialog_restore_title)) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.dialog_restore_text))
+                Spacer(modifier = Modifier.height(8.dp))
+                backups.forEach { backupFile ->
+                    TextButton(
+                        onClick = { selectedBackup = backupFile },
+                        enabled = enabled
+                    ) {
+                        Text(backupFile.name, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (selectedBackup != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val sb = selectedBackup
+                    Text("Выбрано: ${sb?.name ?: ""}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val sb = selectedBackup
+                    if (sb != null) { onRestore(sb); onDismiss() }
+                },
+                enabled = selectedBackup != null && enabled
+            ) {
+                Text(stringResource(R.string.action_restore))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun AutoEqDialog(
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.dialog_autoeq_title)) },
+        text = { Text(stringResource(R.string.dialog_autoeq_text)) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
 }
 
 

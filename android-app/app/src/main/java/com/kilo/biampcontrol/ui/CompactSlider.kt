@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -50,14 +52,16 @@ internal fun Modifier.semanticsMerge(name: String?, state: String?): Modifier =
     }
 
 /**
- * Высота ручки ползунка: 28 dp при видимой ширине 4 dp.
+ * Высота ручки ползунка: 24 dp при видимой ширине 4 dp.
  *
  * Раньше ползунок рисовался дефолтом — кругом 20 dp, — и выглядел как
  * переключатель, а не как фейдер. Узкая вертикальная ручка со скруглёнными
  * торцами читается как ход резистора и даёт ту же площадь захвата пальцем,
- * что и круг, при меньшем визуальном весе.
+ * что и круг, при меньшем визуальном весе. Высота 24 dp — компактнее
+ * исходных 28 dp, но выше 20 dp (дефолтный круг), чтобы ручка не читалась
+ * как крошка.
  */
-private val ThumbSize = DpSize(4.dp, 28.dp)
+private val ThumbSize = DpSize(4.dp, 24.dp)
 
 /**
  * Компактный слайдер: трек 16 dp, ручка 4×28 dp, зона касания 48 dp.
@@ -100,9 +104,9 @@ fun CompactSlider(
     enabled: Boolean = true,
     contentDescription: String? = null,
     stateDescriptionText: String? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
     val colors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
         activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -133,7 +137,7 @@ fun CompactSlider(
         },
         modifier = modifier
             .padding(horizontal = 8.dp) // зазор между ползунком и краями/соседними элементами
-            .minimumInteractiveComponentSize() // зона касания 48 dp при видимых 28 dp
+            .minimumInteractiveComponentSize() // зона касания 48 dp при видимых 24 dp
             .semanticsMerge(contentDescription, stateDescriptionText)
     )
 }

@@ -47,6 +47,11 @@ class DevicePrefs(context: Context) {
     val lastName: String?
         get() = prefs.getString(KEY_NAME, null)
 
+    /** Обновляет имя устройства в локальных настройках (не отправляется на ESP32). */
+    fun setLastName(name: String) {
+        prefs.edit().putString(KEY_NAME, name).apply()
+    }
+
     /** Подключаться к запомненному устройству при старте приложения. */
     var autoConnect: Boolean
         get() = prefs.getBoolean(KEY_AUTO, true)

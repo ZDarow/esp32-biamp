@@ -65,6 +65,30 @@
     <string name="preset_night">Night</string>
     <string name="preset_party">Party</string>
 
+    <!-- Статус подключения (BDK карточка) -->
+    <string name="conn_status_title">Статус подключения</string>
+    <string name="conn_status_connected">Подключено</string>
+    <string name="conn_status_disconnected">Не подключено</string>
+    <string name="conn_status_device">Устройство: %1$s</string>
+    <string name="conn_status_no_device">Устройство не выбрано</string>
+    <string name="btn_connect_other">Подключить другое устройство</string>
+
+    <!-- Эквалайзер (BDK карточка) -->
+    <string name="section_eq_presets">Эквалайзер — пресеты</string>
+    <string name="eq_preset_flat">Flat</string>
+    <string name="eq_preset_bass">Bass</string>
+    <string name="eq_preset_treble">Treble</string>
+    <string name="eq_preset_vshape">V-Shape</string>
+
+    <!-- Индикатор уровней (BDK карточка) -->
+    <string name="section_audio_levels">Уровни сигнала</string>
+    <string name="level_waiting">Ожидание аудио…</string>
+    <string name="level_ring_drops">Потери кольца</string>
+    <string name="level_bad_samples">Плохие отсчёты</string>
+    <string name="level_underrun">Underrun</string>
+    <string name="level_clips">Клиппинг</string>
+    <string name="level_starve">Голодание</string>
+
     <!-- Вкладка «Сервис» -->
     <string name="service_title">Сервис</string>
     <string name="section_speaker_test">Тест динамиков</string>
@@ -147,5 +171,27 @@
 
     <!-- Документация в шторке: подсказка под заголовком. -->
     <string name="docs_sheet_hint">Потяните шторку вниз или нажмите крестик, чтобы закрыть</string>
+
+    <!-- Настройки устройства (BDK карточка) -->
+    <string name="section_device_settings">Настройки устройства</string>
+    <string name="label_device_name">Имя устройства</string>
+    <string name="hint_device_name">ESP32 BiAmp Speaker</string>
+    <string name="btn_apply_name">Применить имя</string>
+
+    <!-- Бекап и восстановление конфигурации -->
+    <string name="section_backup">Бекап конфигурации</string>
+    <string name="action_backup">Бекап</string>
+    <string name="action_restore">Восстановить</string>
+    <string name="action_restore_short">Восст.</string>
+    <string name="action_delete">Удалить</string>
+    <string name="dialog_restore_title">Восстановление конфигурации</string>
+    <string name="dialog_restore_text">Выберите файл бекапа для восстановления настроек на устройстве:</string>
+
+    <!-- AutoEQ (параметрический эквалайзер) -->
+    <string name="section_autoeq">AutoEQ — коррекция АЧХ</string>
+    <string name="action_autoeq_import">Импорт профиля</string>
+    <string name="dialog_autoeq_title">AutoEQ профиль</string>
+    <string name="dialog_autoeq_text">Выберите файл ParametricEQ.txt (формат AutoEQ) для применения на усилителе.</string>
+    <string name="action_close">Закрыть</string>
 
 </resources>
