@@ -39,7 +39,7 @@ class StatusSyncManager(
     }
 
     fun onLine(line: String) {
-// ⚠️ Парсинг VU/Peak/LUFS/CompGR удалён: прошивка NEW (v35.2-local)
+// ⚠️ Парсинг VU/Peak/LUFS/CompGR удалён: прошивка NEW (v35.1)
         // не отдаёт эти метрики в `stats` — она пишет Underrun:/RingDrops:/
         // Clips:/Starve: (диагностика). App ожидал VU:/Peak:/LUFS:/CompGR:,
         // но формат не согласован ни с контрактом v35.1, ни с прошивкой.

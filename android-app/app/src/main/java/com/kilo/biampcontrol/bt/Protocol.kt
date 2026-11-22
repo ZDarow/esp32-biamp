@@ -107,7 +107,7 @@ data class DeviceState(
     // GainReductionMeter читают ds.vuL/ds.peakL/ds.compGr/ds.lufs. Удалять
     // их отсюда пришлось бы править DspTab.kt — трогать чужие правки не
     // будем. Реальное значение этих полей НЕ заполняется: StatusSyncManager
-    // больше не парсит `stats`, потому что прошивка NEW (v35.2-local) не
+    // больше не парсит `stats`, потому что прошивка NEW (v35.1) не
     // отдаёт VU:/Peak:/LUFS:/CompGR: — она пишет Underrun:/RingDrops:/
     // Clips:/Starve: (диагностика). Формат не согласован ни с контрактом
     // v35.1, ни с прошивкой. Метры в UI показывают дефолт (-80 дБ / 0 дБ),
