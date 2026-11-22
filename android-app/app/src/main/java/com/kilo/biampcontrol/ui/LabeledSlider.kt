@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -22,16 +24,23 @@
  */
 package com.kilo.biampcontrol.ui
 
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.collect
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -80,7 +89,35 @@ fun LabeledSlider(
     LaunchedEffect(remote) { value.value = remote }
     val pos = value.value
 
+    // Tooltip при перетаскивании: палец накрывает значение справа от
+    // ползунка (compose-audio-controls, «Our finger hides the knob»),
+    // поэтому дублируем его всплывающей меткой сверху. Появляется при
+    // первом касании и пропадает при отпускании — без неё значение
+    // теряется на фоне пальца.
+    val interactionSource = remember { MutableInteractionSource() }
+    var isDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(interactionSource) {
+        interactionSource.interactions.collect { interaction ->
+            isDragging = when (interaction) {
+                is PressInteraction.Press -> true
+                is PressInteraction.Release, is PressInteraction.Cancel -> false
+                else -> isDragging
+            }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
+        if (isDragging) {
+            Text(
+                sliderStateText(pos, steps, suffix),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 2.dp),
+                textAlign = TextAlign.Center
+            )
+        }
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -93,9 +130,9 @@ fun LabeledSlider(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        // Контейнер height(28.dp): зона касания ползунка остаётся 48 dp
+        // Контейнер height(24.dp): зона касания ползунка остаётся 48 dp
         // (minimumInteractiveComponentSize центрирует трек и ужимает занятую высоту).
-        Row(Modifier.fillMaxWidth().height(28.dp)) {
+        Row(Modifier.fillMaxWidth().height(24.dp)) {
             CompactSlider(
                 value = pos,
                 onValueChange = { value.value = it },
@@ -103,6 +140,7 @@ fun LabeledSlider(
                 valueRange = range,
                 steps = steps,
                 enabled = enabled,
+                interactionSource = interactionSource,
                 contentDescription = label,
                 stateDescriptionText = sliderStateText(pos, steps, suffix),
                 modifier = Modifier.fillMaxWidth()

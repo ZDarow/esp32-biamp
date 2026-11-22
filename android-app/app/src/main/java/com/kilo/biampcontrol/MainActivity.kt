@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в firmware/DOCUMENTATION.md, раздел 4.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -31,6 +33,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
@@ -86,6 +89,15 @@ class MainActivity : ComponentActivity() {
             if (granted.values.any { it }) {
                 val vm: BiAmpViewModel by viewModels()
                 vm.refreshDevices(this)
+            }
+        }
+
+    /** Выбор файла профиля AutoEQ (ParametricEQ.txt). */
+    private val autoEqFileLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { fileUri ->
+                val vm: BiAmpViewModel by viewModels()
+                vm.applyAutoEqFile(fileUri)
             }
         }
 
@@ -169,17 +181,19 @@ val tabs = listOf(
                     // Одна кнопка на всё: сам факт нажатия и цвет значка
                     // показывают состояние. Отдельные «Подкл.»/«Откл.» рядом
                     // с индикатором дублировали то же самое текстом.
-                    IconButton(
-                        onClick = {
-                            if (connState == ConnState.CONNECTED ||
-                                connState == ConnState.RECONNECTING
-                            ) {
-                                vm.disconnect()
-                            } else {
-                                vm.refreshDevices(ctx)
-                                showDevicePicker = true
-                            }
-                        },
+                        IconButton(
+                            onClick = {
+                                if (connState == ConnState.CONNECTED ||
+                                    connState == ConnState.RECONNECTING
+                                ) {
+                                    vm.disconnect()
+                                    vm.logUi("CONN", "disconnect")
+                                } else {
+                                    vm.refreshDevices(ctx)
+                                    showDevicePicker = true
+                                    vm.logUi("CONN", "scan")
+                                }
+                            },
                         modifier = Modifier.semanticsMerge(
                             stringResource(R.string.conn_toggle_cd),
                             connStateText
@@ -246,6 +260,7 @@ val tabs = listOf(
                         TextButton(
                             onClick = {
                                 vm.connect(dev)
+                                vm.logUi("CONN", "connect ${dev.name ?: dev.address}")
                                 showDevicePicker = false
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -273,6 +288,7 @@ val tabs = listOf(
                         label = stringResource(R.string.mac_connect),
                         onClick = {
                             if (vm.connectByAddress(ctx, macInput)) {
+                                vm.logUi("CONN", "connect by MAC $macInput")
                                 showDevicePicker = false
                             } else {
                                 macError = true
@@ -297,10 +313,10 @@ val tabs = listOf(
                             }
                             Switch(
                                 checked = autoOn,
-                                onCheckedChange = { vm.setAutoConnect(it) }
+                                onCheckedChange = { vm.setAutoConnect(it); vm.logUi("AUTOCONNECT", "on=$it") }
                             )
                         }
-                        TextButton(onClick = { vm.forgetDevice() }) {
+                        TextButton(onClick = { vm.forgetDevice(); vm.logUi("CONN", "forget device") }) {
                             Text(stringResource(R.string.forget_device))
                         }
                     }

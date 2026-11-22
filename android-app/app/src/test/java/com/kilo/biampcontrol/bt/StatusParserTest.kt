@@ -275,14 +275,14 @@ assertEquals(listOf(false, true), s.muted)
         assertEquals(10f, s.bal, 1e-4f)
         assertEquals(200f, s.fc, 1e-4f)
         assertEquals(80f, s.hp, 1e-4f)
-        assertEquals(3f, s.tlf, 1e-4f)
-        assertEquals(-6f, s.thf, 1e-4f)
+        assertEquals(6f, s.tlf, 1e-4f)
+        assertEquals(-9f, s.thf, 1e-4f)
         assertEquals(12f, s.eql, 1e-4f)
         assertEquals(-12f, s.eqm, 1e-4f)
         assertEquals(4, s.testMode)
         assertEquals(6, s.testVol)
         assertEquals(20 to 20000, s.chFilters[0])
-        assertEquals(listOf(220, 0, 0, 0), s.delays)
+        assertEquals(listOf(999, 0, 0, 0), s.delays)
     }
 
     /** Ноль на канальном фильтре — это «выключено», а не 20 Гц. */

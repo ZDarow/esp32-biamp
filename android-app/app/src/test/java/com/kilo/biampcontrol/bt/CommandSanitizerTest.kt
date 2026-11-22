@@ -20,7 +20,7 @@ class CommandSanitizerTest {
     fun `обычные команды проходят без изменений`() {
         for (c in listOf(
             "status", "vol:40", "v0:0", "bal:-3", "fc:200", "hp:20",
-            "eql:12", "tlf:-6.0", "chhp:0:31", "delay0:220",
+            "eql:12", "tlf:-6.0", "chhp:0:31", "delay0:1024",
             "mute:0:1", "swap:1", "dup:0", "test:anti", "preset:3",
             "tvol:6", "xotype:2", "save", "reboot", "factory"
         )) {

@@ -1,9 +1,11 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth SPP: приложение открывает RFCOMM-сокет к
- * ESP32 ("ESP32 BiAmp Speaker") и обменивается текстовыми командами.
- * Формат команд и ответов — в protocol/status-contract.md, раздел 2.
+ * Управление идёт по Bluetooth LE GATT: приложение подключается к
+ * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
+ * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
+ * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * раздел 2.
  *
  * Copyright (C) 2026 ZDarow
  *
@@ -62,7 +64,8 @@ class CommandSender(
      * Журнал потерь. Продлён параметром, чтобы юнит-тесты не упирались в
      * заглушку `android.util.Log` (в JVM-тестах она бросает «Stub!»).
      */
-    private val logger: (String) -> Unit = { Log.w(TAG, it) }
+    private val logger: (String) -> Unit = { Log.w(TAG, it) },
+    private val logCmd: ((String) -> Unit)? = null
 ) {
 
     /**
@@ -77,6 +80,14 @@ class CommandSender(
      * `tvol:` — громкость тест-сигнала, такой же ползунок: без троттлинга
      * он уходил в немедленную очередь и забивал SPP на каждом кадре
      * перетаскивания, вытесняя оттуда команды транспорта.
+     *
+     * ⚠️ `limon:`/`limthr:`/`limratio:`/`limatt:`/`limrel:` удалены:
+     * лимитер ушёл из прошивки NEW (v35.2-local), в контракте v35.1
+     * его нет, и билдеров для него в BiAmpViewModel не осталось — префикс
+     * был мёртвым кодом, который мог только принять команду, которой
+     * прошивка молча откажется.
+     * PEQ (`peq:C:Fc:Gain:Q:type`, `peq:preamp:N`) — присутствует в прошивке,
+     * команды отправляются без обёртки `peq:load`/`peq:end`.
      */
     private val throttlePrefixes = listOf(
         "vol:", "v0:", "v1:", "bal:", "fc:", "hp:",
@@ -143,6 +154,7 @@ class CommandSender(
             while (true) {
                 val cmd = immediate.tryReceive().getOrNull() ?: break
                 spp.sendLine(cmd)
+                logCmd?.invoke(cmd)
             }
             // 2) накопленные «ползунковые» — пакетом раз в 150 мс
             val t = now()
@@ -151,7 +163,10 @@ class CommandSender(
                     if (pending.isEmpty()) emptyList()
                     else { val l = pending.values.toList(); pending.clear(); l }
                 }
-                for (c in batch) spp.sendLine(c)
+                for (c in batch) {
+                    spp.sendLine(c)
+                    logCmd?.invoke(c)
+                }
                 if (batch.isNotEmpty()) lastBatchAt = t
             }
             delay(25)

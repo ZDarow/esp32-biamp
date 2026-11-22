@@ -145,4 +145,20 @@
     <!-- Documentation sheet: hint under the title. -->
     <string name="docs_sheet_hint">Drag the sheet down or tap the cross to close</string>
 
+    <!-- Backup and restore configuration -->
+    <string name="section_backup">Configuration backup</string>
+    <string name="action_backup">Backup</string>
+    <string name="action_restore">Restore</string>
+    <string name="action_restore_short">Restore</string>
+    <string name="action_delete">Delete</string>
+    <string name="dialog_restore_title">Restore configuration</string>
+    <string name="dialog_restore_text">Select a backup file to restore settings on the device:</string>
+
+    <!-- AutoEQ (parametric equaliser) -->
+    <string name="section_autoeq">AutoEQ — frequency response correction</string>
+    <string name="action_autoeq_import">Import profile</string>
+    <string name="dialog_autoeq_title">AutoEQ profile</string>
+    <string name="dialog_autoeq_text">Select a ParametricEQ.txt file (AutoEQ format) to apply to the amplifier.</string>
+    <string name="action_close">Close</string>
+
 </resources>
