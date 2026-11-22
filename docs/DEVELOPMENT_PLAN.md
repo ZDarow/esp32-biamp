@@ -2,7 +2,7 @@
 
 ## Этап 0. Подготовка и фиксация базовой линии
 - [x] Исправить критичные находки аудита
-- [x] git init + тег v35.2-local-base
+- [x] git init + тег v35.1.0
 - [x] Снять метрики: stats, click, Heap final, dsp_max_us, wr_max_us, loop_max_ms
 - Бюджет DSP: 256 кадров @44.1 кГц = 5.8 мс, dsp_max_us <= 5000 мкс
 
