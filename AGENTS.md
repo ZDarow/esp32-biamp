@@ -13,7 +13,7 @@
 Монорепозиторий двух жёстко связанных компонентов:
 
 ```
-firmware/ESP32_BiAmp/    прошивка ESP32 (Arduino C++), версия v29
+firmware/ESP32_BiAmp/    прошивка ESP32 (Arduino C++), версия v35.1
 android-app/             приложение управления (Kotlin, Jetpack Compose)
 ```
 

@@ -64,7 +64,7 @@ hotfix/v<X.Y>                     — срочное исправление на
 ## 5. Документация
 
 - Все изменения протокола — в одном коммите с кодом.
-- Источник истины по протоколу — `firmware/protocol/status-contract.md`.
+- Источник истины по протоколу — `protocol/status-contract.md`.
 - `firmware/DOCUMENTATION.md` — общая документация прошивки, не дублирует
   контракт: раздел 4 содержит **ссылку** на `protocol/status-contract.md`.
 - `android-app/docs/DOCUMENTATION.md` — документация приложения, раздел 4.4

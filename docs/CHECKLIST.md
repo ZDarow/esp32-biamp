@@ -15,7 +15,7 @@
 - [ ] Юнит-тесты Android проходят (`.\gradlew.bat testDebugUnitTest`)
 - [ ] Host-тесты DSP проходят (если трогал DSP)
 - [ ] `LimitsContractTest` проходит — константы `Limits` соответствуют
-      `firmware/protocol/status-contract.md`
+      `protocol/status-contract.md`
 - [ ] Нет пропущенных тестов, которые должны бы работать
 
 ## Протокол
@@ -25,7 +25,7 @@
 - [ ] Изменён лимит значения? → `safeCmdVal()` в прошивке и константа в UI
       изменены вместе.
 - [ ] Новая команда? → она есть в прошивке (иначе будет молча проигнорирована).
-- [ ] Изменён `status`? → `firmware/protocol/status-contract.md` и
+- [ ] Изменён `status`? → `protocol/status-contract.md` и
       `android-app/docs/DOCUMENTATION.md` обновлены.
 
 ## Код

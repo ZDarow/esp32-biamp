@@ -1,6 +1,6 @@
 /*
  * Контрактный тест: константы Limits из bt/Protocol.kt против таблицы
- * диапазонов из firmware/protocol/status-contract.md, раздел 4.
+ * диапазонов из `protocol/status-contract.md`, раздел 4.
  *
  * Зачем он нужен. Раздел 4 контракта — единая таблица диапазонов для всех
  * клиентов, и AGENTS.md требует держать лимиты приложения равными
@@ -316,7 +316,7 @@ class LimitsContractTest {
 private fun contractCommandsOrSkip(): Set<String> {
     val file = findContractFile()
     assumeTrue(
-        "нет файла контракта firmware/protocol/status-contract.md — он в ветке направления firmware",
+        "нет файла контракта `protocol/status-contract.md` — он в ветке направления firmware",
         file != null,
     )
 
@@ -340,7 +340,7 @@ private fun contractCommandsOrSkip(): Set<String> {
 private fun contractRangesOrSkip(): List<ContractRange> {
     val file = findContractFile()
     assumeTrue(
-        "нет файла контракта firmware/protocol/status-contract.md — он в ветке направления firmware",
+        "нет файла контракта `protocol/status-contract.md` — он в ветке направления firmware",
         file != null,
     )
 

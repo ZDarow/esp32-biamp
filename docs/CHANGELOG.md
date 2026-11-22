@@ -5,11 +5,11 @@
 
 ## [unreleased]
 
-Текущие изменения (ветка `android/adaptive-navigation`):
+Текущие изменения:
 
 - Добавлен контрактный тест `LimitsContractTest` (13 тестов), проверяет
   соответствие констант `Limits` таблице диапазонов
-  `firmware/protocol/status-contract.md`.
+  `protocol/status-contract.md`.
 - Добавлены PC-тесты `test_limits_contract.py` (15 новых, 95 всего).
 - Добавлены instrumented-тесты `BiAmpViewModelTest`, `MainScreenTest`,
   `DialTest`, `DialMathTest`, `ActionCatalogTest`, `ConnectionOverlayTest`,
