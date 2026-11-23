@@ -1135,13 +1135,13 @@ static bool cmdArgIs(const char *cmd, const char *arg) {
 void dispatchCommand(const char *cmd, bool from_spp) {
   float v;
   if (cmdIs(cmd, "vol:")) {
-    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[0] = vol_z[1] = v / 100.0f; TOUCH(); }
+    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[0] = vol_z[1] = powf(v / 100.0f, 3.0f); TOUCH(); }
   }
   else if (cmdIs(cmd, "v0:")) {
-    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[0] = v / 100.0f; TOUCH(); }
+    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[0] = powf(v / 100.0f, 3.0f); TOUCH(); }
   }
   else if (cmdIs(cmd, "v1:")) {
-    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[1] = v / 100.0f; TOUCH(); }
+    if (safeCmdVal(cmd, v, 0, 100)) { vol_z[1] = powf(v / 100.0f, 3.0f); TOUCH(); }
   }
   else if (cmdIs(cmd, "bal:")) {
     if (safeCmdVal(cmd, v, -10, 10)) { bal = v; TOUCH(); }

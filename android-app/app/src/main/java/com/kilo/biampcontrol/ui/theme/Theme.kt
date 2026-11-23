@@ -154,15 +154,15 @@ private val BiAmpShapes = Shapes(
 /**
  * Тема приложения.
  *
- * @param dynamicColor Material You (обои Android 12+). По умолчанию **выключено**:
- *   акцент панели усилителя — часть марки, и он не должен зависеть от обоев
- *   телефона; включить можно для пользователя, которому важнее единство с
- *   системой, чем узнаваемость.
+ * @param dynamicColor Material You (обои Android 12+). По умолчанию **включено**:
+   *   акцент панели усилителя следует за системой, чтобы приложение выглядело частью ОС;
+   *   выключить можно для пользователя, которому важнее узнаваемость бренда,
+   *   чем единство с системой.
  */
 @Composable
 fun BiAmpTheme(
     darkTheme: Boolean = true,
-    dynamicColor: Boolean = false,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

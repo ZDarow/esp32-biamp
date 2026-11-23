@@ -29,6 +29,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,6 +47,9 @@ import com.kilo.biampcontrol.BiAmpViewModel
 import com.kilo.biampcontrol.R
 import com.kilo.biampcontrol.bt.ConnState
 import com.kilo.biampcontrol.bt.Limits
+import com.kilo.biampcontrol.ui.theme.BrandStatusError
+import com.kilo.biampcontrol.ui.theme.BrandStatusOk
+import com.kilo.biampcontrol.ui.theme.BrandStatusWarn
 import java.io.File
 import java.nio.charset.StandardCharsets
 import kotlin.math.roundToInt
@@ -143,6 +147,23 @@ fun ServiceTab(vm: BiAmpViewModel) {
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(stringResource(R.string.section_diagnostics), style = MaterialTheme.typography.titleMedium)
+        // Индикатор здоровья тракта: цветной индикатор состояния соединения
+        // и флаг синхронизации. Детальные цифры — ниже в текстовом блоке.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.health_title),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(0.3f)
+            )
+            HealthIndicator(
+                connected = connected == ConnState.CONNECTED,
+                syncing = syncing,
+                modifier = Modifier.weight(0.7f)
+            )
+        }
         BdkCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (syncing) {
@@ -479,4 +500,44 @@ private fun AutoEqDialog(
     )
 }
 
+/**
+ * Компактный индикатор здоровья тракта.
+ *
+ * Показывает два состояния: соединение с усилителем и синхронизацию
+ * статуса. Зелёный — всё в порядке, жёлтый — идёт обмен, красный — нет
+ * соединения. Детальные метрики (RingDrops, Clips и т.п.) — в текстовом
+ * блоке диагностики ниже; эта строка даёт быструю визуальную оценку.
+ */
+@Composable
+private fun HealthIndicator(
+    connected: Boolean,
+    syncing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val color = when {
+        !connected -> BrandStatusError
+        syncing -> BrandStatusWarn
+        else -> BrandStatusOk
+    }
+    val label = when {
+        !connected -> stringResource(R.string.health_disconnected)
+        syncing -> stringResource(R.string.health_syncing)
+        else -> stringResource(R.string.health_ok)
+    }
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Canvas(modifier = Modifier.size(12.dp)) {
+            drawCircle(color = color, radius = 6f)
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+        Spacer(Modifier.weight(1f))
+    }
+}
 

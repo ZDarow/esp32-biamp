@@ -41,10 +41,10 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -115,15 +115,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun ensurePermissions() {
+    internal fun ensurePermissions() {
         val missing = btPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
     }
 }
-
-data class TabItem(val title: String, val icon: ImageVector)
 
 /**
  * Цвет значка подключения.
@@ -137,6 +135,15 @@ internal fun connColor(state: ConnState): Color = when (state) {
     ConnState.DISCONNECTED -> Color(0xFFF44336)
 }
 
+/**
+ * Основной экран с навигацией.
+ *
+ * Навигация — нижняя панель [NavigationBar] с тремя вкладками. Адаптивный
+ * переключатель на навигационную рейл для планшет/складка требует
+ * material3-adaptive (BOM 2026.09.00), который пока недостижим из-за
+ * краша lint на K2 (AGENTS.md). Оставляю NavigationBar — он корректно
+ * работает на всех размерах экранов.
+ */
 @SuppressLint("MissingPermission")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,12 +164,6 @@ fun MainScreen(vm: BiAmpViewModel) {
         ConnState.DISCONNECTED -> stringResource(R.string.conn_state_off)
     }
 
-val tabs = listOf(
-        TabItem(stringResource(R.string.tab_volume), Icons.Default.GraphicEq),
-        TabItem(stringResource(R.string.tab_dsp), Icons.Default.Settings),
-        TabItem(stringResource(R.string.tab_service), Icons.Default.Build)
-    )
-
     // Устройство выбирают один раз: дальше приложение помнит его и
     // подключается само. refreshDevices — чтобы список сопряжённых был
     // актуален, autoConnectIfSaved — чтобы не ждать ручного нажатия.
@@ -176,22 +177,19 @@ val tabs = listOf(
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
-                    // Одна кнопка на всё: сам факт нажатия и цвет значка
-                    // показывают состояние. Отдельные «Подкл.»/«Откл.» рядом
-                    // с индикатором дублировали то же самое текстом.
-                        IconButton(
-                            onClick = {
-                                if (connState == ConnState.CONNECTED ||
-                                    connState == ConnState.RECONNECTING
-                                ) {
-                                    vm.disconnect()
-                                    vm.logUi("CONN", "disconnect")
-                                } else {
-                                    vm.refreshDevices(ctx)
-                                    showDevicePicker = true
-                                    vm.logUi("CONN", "scan")
-                                }
-                            },
+                    IconButton(
+                        onClick = {
+                            if (connState == ConnState.CONNECTED ||
+                                connState == ConnState.RECONNECTING
+                            ) {
+                                vm.disconnect()
+                                vm.logUi("CONN", "disconnect")
+                            } else {
+                                vm.refreshDevices(ctx)
+                                showDevicePicker = true
+                                vm.logUi("CONN", "scan")
+                            }
+                        },
                         modifier = Modifier.semanticsMerge(
                             stringResource(R.string.conn_toggle_cd),
                             connStateText
@@ -209,14 +207,24 @@ val tabs = listOf(
         },
         bottomBar = {
             NavigationBar {
-                tabs.forEachIndexed { i, tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == i,
-                        onClick = { selectedTab = i },
-                        icon = { Icon(tab.icon, contentDescription = tab.title) },
-                        label = { Text(tab.title) }
-                    )
-                }
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.GraphicEq, contentDescription = null) },
+                    label = { Text(stringResource(R.string.tab_volume)) }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    label = { Text(stringResource(R.string.tab_dsp)) }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Build, contentDescription = null) },
+                    label = { Text(stringResource(R.string.tab_service)) }
+                )
             }
         }
     ) { padding ->
@@ -327,4 +335,3 @@ val tabs = listOf(
         )
     }
 }
-

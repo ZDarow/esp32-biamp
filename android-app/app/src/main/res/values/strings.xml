@@ -194,4 +194,10 @@
     <string name="dialog_autoeq_text">Выберите файл ParametricEQ.txt (формат AutoEQ) для применения на усилителе.</string>
     <string name="action_close">Закрыть</string>
 
+    <!-- Индикатор здоровья тракта -->
+    <string name="health_title">Тракт</string>
+    <string name="health_ok">Исправен</string>
+    <string name="health_syncing">Синхронизация</string>
+    <string name="health_disconnected">Нет связи</string>
+
 </resources>
