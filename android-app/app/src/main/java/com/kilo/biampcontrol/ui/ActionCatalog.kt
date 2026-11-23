@@ -95,7 +95,7 @@ object ActionCatalog {
     }
 
     /** Диагностические запросы без аргументов, раздел 4.7. */
-    val DIAGNOSTICS: List<String> = listOf("stats", "drift", "help", "heap")
+    val DIAGNOSTICS: List<String> = listOf("stats", "help", "heap")
 
     /**
      * Команды транспорта, раздел 4.7.

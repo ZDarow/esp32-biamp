@@ -1,10 +1,10 @@
 /*
  * BiAmp Control — Android-приложение для усилителя ESP32 Bi-Amp.
  *
- * Управление идёт по Bluetooth LE GATT: приложение подключается к
- * ESP32 ("ESP32 BiAmp Speaker"), открывает сервис 0xF000 и обменивается
- * текстовыми командами через характеристики 0xF001 (команды) и 0xF002
- * (статус). Формат команд и ответов — в protocol/status-contract.md,
+ * Управление идёт по Bluetooth SPP (RFCOMM, Bluetooth Classic):
+ * приложение подключается к ESP32 ("ESP32 BiAmp Speaker") через сокет
+ * SPP UUID 00001101-0000-1000-8000-00805F9B34FB и обменивается текстовыми
+ * командами. Формат команд и ответов — в protocol/status-contract.md,
  * раздел 2. Источник истины — прошивка ESP32.
  *
  * Copyright (C) 2026 ZDarow
@@ -25,17 +25,15 @@
 package com.kilo.biampcontrol.bt
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothGatt
-import android.bluetooth.BluetoothGattCallback
-import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothGattDescriptor
-import android.bluetooth.BluetoothGattService
-import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.util.UUID
 
 enum class ConnState { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING }
@@ -61,9 +59,9 @@ interface SppClient : SppTransport {
 }
 
 /**
- * BLE GATT-клиент: подключение к ESP32, обнаружение сервиса 0xF000,
- * запись команд в характеристику 0xF001, приём статуса через уведомления
- * от характеристики 0xF002. Автореконнект (5 попыток), построчное чтение.
+ * SPP/RFCOMM-клиент: подключение к ESP32 через сокет Bluetooth Classic,
+ * запись команд в выходной поток, приём строк через входящий поток.
+ * Автореконнект (5 попыток), построчное чтение.
  */
 class SppManager(
     private val scope: CoroutineScope,
@@ -73,14 +71,12 @@ class SppManager(
     companion object {
         private const val TAG = "SppManager"
 
-        // UUID совпадают с прошивкой ESP32 (BLE GATT сервис 0xF000)
-        val SERVICE_UUID = UUID.fromString("0000F000-0000-1000-8000-00805F9B34FB")
-        val CHAR_CMD_UUID = UUID.fromString("0000F001-0000-1000-8000-00805F9B34FB")
-        val CHAR_STATUS_UUID = UUID.fromString("0000F002-0000-1000-8000-00805F9B34FB")
+        // Стандартный UUID профиля SPP (Serial Port Profile), Bluetooth Classic.
+        val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
         private val RETRY_DELAYS = longArrayOf(2_000, 4_000, 8_000, 15_000, 30_000)
 
-        /** Реальный предел ожидания connectGatt / обнаружения сервисов. */
+        /** Реальный предел ожидания подключения сокета. */
         const val CONNECT_TIMEOUT_MS = 15_000L
 
         /** Предел длины строки ответа. */
@@ -108,107 +104,18 @@ class SppManager(
     }
 
     private val lock = Any()
-    private var gatt: BluetoothGatt? = null
-    private var charCmd: BluetoothGattCharacteristic? = null
-    private var charStatus: BluetoothGattCharacteristic? = null
+    private var socket: BluetoothSocket? = null
     private var targetDevice: BluetoothDevice? = null
     private var generation = 0
     private var job: Job? = null
     @Volatile private var wantConnection = false
 
-    // Очередь записи: одна команда за раз, ждём подтверждения onCharacteristicWrite
+    // Очередь записи: одна команда за раз.
     private val writeQueue = ArrayDeque<String>()
     private var isWriting = false
 
-    // Deferred'ы для асинхронных операций GATT
     private var connectDeferred: CompletableDeferred<Boolean>? = null
-    private var servicesDeferred: CompletableDeferred<Boolean>? = null
     private var disconnectDeferred: CompletableDeferred<Unit>? = null
-
-    private val gattCallback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            if (newState == BluetoothGatt.STATE_CONNECTED) {
-                logEvent("GATT", "connected, status=$status")
-                connectDeferred?.complete(true)
-                gatt.discoverServices()
-            } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
-                logEvent("GATT", "disconnected, status=$status")
-                connectDeferred?.complete(false)
-                disconnectDeferred?.complete(Unit)
-                synchronized(lock) {
-                    charCmd = null
-                    charStatus = null
-                    this@SppManager.gatt = null
-                    isWriting = false
-                    writeQueue.clear()
-                }
-                if (wantConnection) {
-                    _state.value = ConnState.RECONNECTING
-                    logEvent("CONN", "scheduling reconnect")
-                    scope.launch { reconnectLoop() }
-                } else {
-                    _state.value = ConnState.DISCONNECTED
-                }
-            }
-        }
-
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            servicesDeferred?.complete(status == BluetoothGatt.GATT_SUCCESS)
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                logEvent("GATT", "service discovery failed, status=$status")
-                return
-            }
-            val service = gatt.getService(SERVICE_UUID) ?: return
-            synchronized(lock) {
-                charCmd = service.getCharacteristic(CHAR_CMD_UUID)
-                val cs = service.getCharacteristic(CHAR_STATUS_UUID)
-                charStatus = cs
-                if (cs != null) {
-                    gatt.setCharacteristicNotification(cs, true)
-                    val cccd = cs.getDescriptor(
-                        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-                    )
-                    if (cccd != null) {
-                        cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        gatt.writeDescriptor(cccd)
-                    }
-                }
-            }
-            logEvent("GATT", "services discovered, service=0xF000, cmd=0xF001, status=0xF002")
-            _state.value = ConnState.CONNECTED
-        }
-
-        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                logEvent("GATT_WRITE", "command written OK")
-            } else {
-                logEvent("GATT_WRITE", "command write failed, status=$status")
-            }
-            synchronized(lock) { isWriting = false }
-            processWriteQueue()
-        }
-
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            if (characteristic.uuid != CHAR_STATUS_UUID) return
-            val data = characteristic.value ?: return
-            val text = String(data, Charsets.UTF_8).trim()
-            if (text.isNotEmpty()) {
-                logEvent("GATT_READ", text)
-                for (raw in text.split("\n")) {
-                    val line = raw.trim()
-                    if (line.isNotEmpty()) {
-                        if (!_lines.tryEmit(line)) {
-                            _droppedLines.value += 1
-                        }
-                    }
-                }
-            }
-        }
-
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            // Уведомления включены/выключены
-        }
-    }
 
     override fun connect(dev: BluetoothDevice) {
         val gen = synchronized(lock) { ++generation }
@@ -226,19 +133,18 @@ class SppManager(
             generation++
             disconnectDeferred?.complete(Unit)
         }
-        closeGatt()
+        closeSocket()
         job?.cancel()
         job = null
         _state.value = ConnState.DISCONNECTED
     }
 
-    private fun closeGatt() {
+    private fun closeSocket() {
         synchronized(lock) {
-            gatt?.disconnect()
-            gatt?.close()
-            gatt = null
-            charCmd = null
-            charStatus = null
+            socket?.inputStream?.close()
+            socket?.outputStream?.close()
+            socket?.close()
+            socket = null
             isWriting = false
             writeQueue.clear()
         }
@@ -259,16 +165,18 @@ class SppManager(
             isWriting = true
             writeQueue.removeFirst()
         }
-        val c = synchronized(lock) { charCmd }
-        val g = synchronized(lock) { gatt }
-        if (c == null || g == null) {
+        val s = synchronized(lock) { socket }
+        if (s == null) {
             synchronized(lock) { isWriting = false }
-            processWriteQueue()
             return
         }
-        c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        c.setValue((cmd + "\n").toByteArray(Charsets.UTF_8))
-        if (!g.writeCharacteristic(c)) {
+        try {
+            s.outputStream.write((cmd + "\n").toByteArray())
+            s.outputStream.flush()
+            logEvent("SPP_WRITE", "command written OK")
+        } catch (e: Exception) {
+            logEvent("SPP_WRITE", "command write failed: ${e.message}")
+        } finally {
             synchronized(lock) { isWriting = false }
             processWriteQueue()
         }
@@ -283,16 +191,17 @@ class SppManager(
             _state.value = if (attempt == 0) ConnState.CONNECTING else ConnState.RECONNECTING
 
             connectDeferred = CompletableDeferred<Boolean>()
-            servicesDeferred = CompletableDeferred<Boolean>()
 
-            val gatt = dev.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            val sock = try {
+                dev.createRfcommSocketToServiceRecord(SPP_UUID)
+            } catch (e: Exception) {
+                logEvent("CONN", "createRfcommSocket failed: ${e.message}")
+                null
+            }
 
-            val connOk = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { connectDeferred!!.await() }
-            if (connOk != true || !isCurrent(gen) || !wantConnection) {
-                gatt.close()
-                synchronized(lock) { this.gatt = null }
+            if (sock == null) {
+                synchronized(lock) { this.socket = null }
                 connectDeferred = null
-                servicesDeferred = null
                 if (!wantConnection || !isCurrent(gen)) break
                 if (attempt >= RETRY_DELAYS.size) {
                     _state.value = ConnState.DISCONNECTED
@@ -303,14 +212,20 @@ class SppManager(
                 continue
             }
 
-            synchronized(lock) { this.gatt = gatt }
+            val connOk = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+                try {
+                    sock.connect()
+                    true
+                } catch (e: Exception) {
+                    logEvent("CONN", "socket connect failed: ${e.message}")
+                    false
+                }
+            }
 
-            val svcOk = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { servicesDeferred!!.await() }
-            if (svcOk != true || !isCurrent(gen) || !wantConnection) {
-                gatt.close()
-                synchronized(lock) { this.gatt = null }
+            if (!(connOk ?: false) || !isCurrent(gen) || !wantConnection) {
+                try { sock.close() } catch (_: Exception) {}
+                synchronized(lock) { this.socket = null }
                 connectDeferred = null
-                servicesDeferred = null
                 if (!wantConnection || !isCurrent(gen)) break
                 if (attempt >= RETRY_DELAYS.size) {
                     _state.value = ConnState.DISCONNECTED
@@ -320,9 +235,16 @@ class SppManager(
                 attempt++
                 continue
             }
+
+            synchronized(lock) { this.socket = sock }
 
             connectDeferred = null
-            servicesDeferred = null
+            _state.value = ConnState.CONNECTED
+
+            // Запускаем чтение строк из сокета.
+            val readJob = scope.launch(Dispatchers.IO) {
+                readLines(sock)
+            }
 
             disconnectDeferred = CompletableDeferred<Unit>()
             try {
@@ -331,8 +253,9 @@ class SppManager(
                 throw e
             }
 
+            readJob.cancel()
             disconnectDeferred = null
-            closeGatt()
+            closeSocket()
 
             if (!wantConnection || !isCurrent(gen)) break
             if (attempt >= RETRY_DELAYS.size) {
@@ -345,58 +268,28 @@ class SppManager(
         if (isCurrent(gen) && !wantConnection) _state.value = ConnState.DISCONNECTED
     }
 
-    private suspend fun reconnectLoop() {
-        var attempt = 0
-        val dev = targetDevice ?: return
-        val gen = synchronized(lock) { generation }
-
-        while (wantConnection && isCurrent(gen)) {
-            if (attempt >= RETRY_DELAYS.size) {
-                _state.value = ConnState.DISCONNECTED
-                return
+    private fun readLines(sock: BluetoothSocket) {
+        val input = sock.inputStream
+        val reader = BufferedReader(InputStreamReader(input))
+        try {
+            while (true) {
+                val line = reader.readLine()
+                if (line == null) {
+                    logEvent("SPP_READ", "stream closed")
+                    break
+                }
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty()) {
+                    if (!_lines.tryEmit(trimmed)) {
+                        _droppedLines.value += 1
+                    }
+                    logEvent("SPP_READ", trimmed)
+                }
             }
-            delay(RETRY_DELAYS[attempt])
-            attempt++
-
-            connectDeferred = CompletableDeferred<Boolean>()
-            servicesDeferred = CompletableDeferred<Boolean>()
-
-            val gatt = dev.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-
-            val connOk = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { connectDeferred!!.await() }
-            if (connOk != true || !isCurrent(gen) || !wantConnection) {
-                gatt.close()
-                synchronized(lock) { this.gatt = null }
-                connectDeferred = null
-                servicesDeferred = null
-                continue
-            }
-
-            synchronized(lock) { this.gatt = gatt }
-
-            val svcOk = withTimeoutOrNull(CONNECT_TIMEOUT_MS) { servicesDeferred!!.await() }
-            if (svcOk != true || !isCurrent(gen) || !wantConnection) {
-                gatt.close()
-                synchronized(lock) { this.gatt = null }
-                connectDeferred = null
-                servicesDeferred = null
-                continue
-            }
-
-            connectDeferred = null
-            servicesDeferred = null
-
-            _state.value = ConnState.CONNECTED
-
-            disconnectDeferred = CompletableDeferred<Unit>()
-            try {
-                disconnectDeferred!!.await()
-            } catch (e: CancellationException) {
-                throw e
-            }
-
-            disconnectDeferred = null
-            closeGatt()
+        } catch (e: Exception) {
+            logEvent("SPP_READ", "read error: ${e.message}")
+        } finally {
+            try { reader.close() } catch (_: Exception) {}
         }
     }
 }

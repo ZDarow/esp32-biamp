@@ -42,12 +42,12 @@ object Limits {
     const val FC_MAX = 1000f
     const val HP_MIN = 20f
     const val HP_MAX = 80f
-    const val TRIM_MIN = -9f
-    const val TRIM_MAX = 6f
+    const val TRIM_MIN = -6f
+    const val TRIM_MAX = 3f
     const val EQ_MIN = -12f
     const val EQ_MAX = 12f
     const val DELAY_MIN = 0
-    const val DELAY_MAX = 1024
+    const val DELAY_MAX = 220
     const val CH_FILTER_MIN = 20
     const val CH_FILTER_MAX = 20000
     const val TEST_VOL_MIN = 0
